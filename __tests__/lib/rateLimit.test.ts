@@ -4,6 +4,10 @@ beforeEach(() => {
   _resetStoreForTesting();
 });
 
+afterEach(() => {
+  jest.useRealTimers();
+});
+
 describe('checkRateLimit', () => {
   it('allows up to 5 requests from the same IP', () => {
     for (let i = 0; i < 5; i++) {
