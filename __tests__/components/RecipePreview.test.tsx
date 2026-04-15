@@ -20,9 +20,9 @@ describe('RecipePreview', () => {
 
   it('renders recipe title in header', () => {
     render(
-      <RecipePreview html="<h1>Pasta</h1>" title="Pasta" onReset={mockOnReset} />
+      <RecipePreview html="<h1>Different Content</h1>" title="My Recipe Title" onReset={mockOnReset} />
     );
-    expect(screen.getByText('Pasta')).toBeInTheDocument();
+    expect(screen.getByText('My Recipe Title')).toBeInTheDocument();
   });
 
   it('renders HTML content', () => {
@@ -47,10 +47,10 @@ describe('RecipePreview', () => {
   it('triggers download when Download button is clicked', () => {
     const clickSpy = jest.fn();
     const mockAnchor = { href: '', download: '', click: clickSpy } as unknown as HTMLAnchorElement;
-    jest.spyOn(document, 'createElement').mockImplementationOnce((tag) => {
-      if (tag === 'a') return mockAnchor;
-      return document.createElement(tag);
-    });
+    const orig = document.createElement.bind(document);
+    jest.spyOn(document, 'createElement').mockImplementation((tag: string) =>
+      tag === 'a' ? mockAnchor : orig(tag)
+    );
 
     render(
       <RecipePreview html="<h1>Pasta Carbonara</h1>" title="Pasta Carbonara" onReset={mockOnReset} />
@@ -58,5 +58,7 @@ describe('RecipePreview', () => {
     fireEvent.click(screen.getByRole('button', { name: /download/i }));
     expect(clickSpy).toHaveBeenCalled();
     expect(mockAnchor.download).toBe('pasta-carbonara.html');
+
+    jest.restoreAllMocks();
   });
 });
