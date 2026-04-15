@@ -33,6 +33,7 @@ function makeBrowser(overrides: Partial<{
 
   const context = {
     newPage: jest.fn().mockResolvedValue(page),
+    close: jest.fn().mockResolvedValue(undefined),
   };
 
   const browser = {
@@ -40,7 +41,7 @@ function makeBrowser(overrides: Partial<{
     close: jest.fn().mockResolvedValue(undefined),
   };
 
-  return { browser, page };
+  return { browser, page, context };
 }
 
 describe('scrapeInstagram', () => {
@@ -64,11 +65,12 @@ describe('scrapeInstagram', () => {
   });
 
   it('closes browser even if page throws', async () => {
-    const { browser, page } = makeBrowser();
+    const { browser, page, context } = makeBrowser();
     page.goto.mockRejectedValue(new Error('Navigation failed'));
     mockLaunch.mockResolvedValue(browser);
 
     await expect(scrapeInstagram('https://www.instagram.com/p/abc/')).rejects.toThrow();
+    expect(context.close).toHaveBeenCalled();
     expect(browser.close).toHaveBeenCalled();
   });
 });
