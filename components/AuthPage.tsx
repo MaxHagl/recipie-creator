@@ -21,6 +21,7 @@ export function AuthPage() {
     });
 
     if (res.ok) {
+      setLoading(false);
       router.refresh();
     } else {
       setError('Invalid password');

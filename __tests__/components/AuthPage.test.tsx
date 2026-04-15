@@ -29,6 +29,7 @@ describe('AuthPage', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /enter/i }));
     await waitFor(() => expect(mockRefresh).toHaveBeenCalled());
+    expect(screen.getByRole('button', { name: /enter/i })).not.toBeDisabled();
   });
 
   it('shows error message on failed auth', async () => {
