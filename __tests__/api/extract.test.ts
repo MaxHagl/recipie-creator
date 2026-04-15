@@ -54,6 +54,10 @@ function mockAuth(valid = true) {
 }
 
 describe('POST /api/extract', () => {
+  beforeEach(() => {
+    mockRateLimit.mockReturnValue(true); // reset to allowed before each test
+  });
+
   afterEach(() => jest.clearAllMocks());
 
   it('returns 401 if session cookie is missing', async () => {
