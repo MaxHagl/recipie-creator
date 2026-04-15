@@ -49,7 +49,7 @@ function makeRequest(body: unknown, ip = '1.2.3.4') {
 }
 
 function mockAuth(valid = true) {
-  mockCookies.mockReturnValue({ get: () => ({ value: 'token' }) });
+  mockCookies.mockResolvedValue({ get: () => ({ value: 'token' }) });
   mockIsValid.mockReturnValue(valid);
 }
 
@@ -61,10 +61,11 @@ describe('POST /api/extract', () => {
   afterEach(() => jest.clearAllMocks());
 
   it('returns 401 if session cookie is missing', async () => {
-    mockCookies.mockReturnValue({ get: () => undefined });
+    mockCookies.mockResolvedValue({ get: () => undefined });
     mockIsValid.mockReturnValue(false);
     const res = await POST(makeRequest({ url: 'https://www.instagram.com/p/abc/' }));
     expect(res.status).toBe(401);
+    expect(mockScrape).not.toHaveBeenCalled();
   });
 
   it('returns 429 if rate limit exceeded', async () => {
@@ -114,5 +115,14 @@ describe('POST /api/extract', () => {
     const data = await res.json();
     expect(data.error).not.toContain('Chromium');
     expect(data.error).not.toContain('0xDEADBEEF');
+  });
+
+  it('returns 422 when scraper throws a login-required error', async () => {
+    mockAuth();
+    mockScrape.mockRejectedValue(new Error('instagram requires login'));
+    const res = await POST(makeRequest({ url: 'https://www.instagram.com/p/abc123/' }));
+    expect(res.status).toBe(422);
+    const data = await res.json();
+    expect(data.error).toContain('private');
   });
 });

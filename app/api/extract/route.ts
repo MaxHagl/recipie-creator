@@ -11,7 +11,7 @@ const INSTAGRAM_URL_RE =
 
 export async function POST(request: Request) {
   // Auth
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const session = cookieStore.get('session');
   if (!session || !isValidSessionToken(session.value)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -32,6 +32,9 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     url = body.url;
+    if (typeof url !== 'string') {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
