@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -13,7 +14,7 @@ export async function uploadVideoToGemini(videoUrl: string): Promise<VideoUpload
   if (!response.ok) throw new Error('Failed to download video');
 
   const buffer = Buffer.from(await response.arrayBuffer());
-  const tempPath = path.join(os.tmpdir(), `reel-${Date.now()}.mp4`);
+  const tempPath = path.join(os.tmpdir(), `reel-${crypto.randomBytes(8).toString('hex')}.mp4`);
 
   await fs.writeFile(tempPath, buffer);
 
