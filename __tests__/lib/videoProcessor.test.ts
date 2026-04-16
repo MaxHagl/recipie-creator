@@ -1,8 +1,18 @@
 jest.mock('@google/generative-ai/server', () => ({
+  FileState: {
+    PROCESSING: 'PROCESSING',
+    ACTIVE: 'ACTIVE',
+    FAILED: 'FAILED',
+  },
   GoogleAIFileManager: jest.fn().mockImplementation(() => ({
     uploadFile: jest.fn().mockResolvedValue({
-      file: { uri: 'https://files.gemini/abc', mimeType: 'video/mp4' },
+      file: {
+        name: 'files/abc',
+        uri: 'https://files.gemini/abc',
+        mimeType: 'video/mp4',
+      },
     }),
+    getFile: jest.fn().mockResolvedValue({ state: 'ACTIVE' }),
   })),
 }));
 

@@ -48,18 +48,36 @@ export async function POST(request: Request) {
   try {
     const { caption, videoUrl } = await scrapeInstagram(url);
 
-    let videoFileUri: string | undefined;
-    let videoMimeType: string | undefined;
-
     if (videoUrl) {
       stage = 'video';
-      const uploaded = await uploadVideoToGemini(videoUrl);
-      videoFileUri = uploaded.fileUri;
-      videoMimeType = uploaded.mimeType;
+
+      try {
+        const uploaded = await uploadVideoToGemini(videoUrl);
+        stage = 'gemini';
+        const { html, title } = await processRecipe(
+          caption,
+          uploaded.fileUri,
+          uploaded.mimeType
+        );
+        return NextResponse.json({ html, title });
+      } catch (videoPipelineError) {
+        // Reel video handling can fail transiently (CDN/Gemini processing). Fall
+        // back to caption-only extraction when possible instead of hard-failing.
+        if (caption.trim().length > 0) {
+          console.warn(
+            '[extract] Video pipeline failed, falling back to caption-only',
+            videoPipelineError
+          );
+          stage = 'gemini';
+          const { html, title } = await processRecipe(caption);
+          return NextResponse.json({ html, title });
+        }
+        throw videoPipelineError;
+      }
     }
 
     stage = 'gemini';
-    const { html, title } = await processRecipe(caption, videoFileUri, videoMimeType);
+    const { html, title } = await processRecipe(caption);
     return NextResponse.json({ html, title });
   } catch (error) {
     console.error('[extract]', error);

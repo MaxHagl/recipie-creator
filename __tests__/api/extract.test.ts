@@ -106,6 +106,24 @@ describe('POST /api/extract', () => {
     expect(mockUpload).toHaveBeenCalledWith('https://example.com/v.mp4');
   });
 
+  it('falls back to caption-only processing when reel video pipeline fails', async () => {
+    mockAuth();
+    mockScrape.mockResolvedValue({
+      caption: 'fallback caption recipe',
+      videoUrl: 'https://example.com/v.mp4',
+    });
+    mockUpload.mockRejectedValue(new Error('video upload failed'));
+    mockProcess.mockResolvedValue({
+      html: '<h1>Caption Fallback</h1>',
+      title: 'Caption Fallback',
+    });
+
+    const res = await POST(makeRequest({ url: 'https://www.instagram.com/reel/abc123/' }));
+    expect(res.status).toBe(200);
+    expect(mockUpload).toHaveBeenCalledWith('https://example.com/v.mp4');
+    expect(mockProcess).toHaveBeenCalledWith('fallback caption recipe');
+  });
+
   it('returns 500 on scraper crash without leaking error details', async () => {
     mockAuth();
     mockScrape.mockRejectedValue(new Error('Chromium crashed unexpectedly at 0xDEADBEEF'));
