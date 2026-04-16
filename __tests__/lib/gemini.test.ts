@@ -87,4 +87,20 @@ describe('processRecipe', () => {
       expect.objectContaining({ model: 'gemini-flash-latest' })
     );
   });
+
+  it('injects a shortcuts reminder button with all ingredients', async () => {
+    mockGenerateContent.mockResolvedValue({
+      response: {
+        text: () =>
+          '<!DOCTYPE html><html><body><h1>Tacos</h1><h2>Ingredients</h2><ul><li>1 lb beef</li><li>2 tortillas</li></ul></body></html>',
+      },
+    });
+
+    const result = await processRecipe('taco caption');
+    expect(result.html).toContain('Add Ingredients To Reminders');
+    expect(result.html).toContain('shortcuts://run-shortcut');
+    expect(result.html).toContain(
+      encodeURIComponent('Tacos:\n- 1 lb beef\n- 2 tortillas')
+    );
+  });
 });

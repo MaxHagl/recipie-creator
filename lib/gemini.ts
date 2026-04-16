@@ -53,6 +53,7 @@ export interface RecipeResult {
   title: string;
 }
 
+const DEFAULT_SHORTCUT_NAME = 'AddHTMLTask';
 const DEFAULT_MODEL_CANDIDATES = [
   'gemini-2.5-flash',
   'gemini-flash-latest',
@@ -69,6 +70,89 @@ function stripCodeFences(text: string): string {
     .replace(/^```(?:html)?\s*/i, '')
     .replace(/\s*```$/i, '')
     .trim();
+}
+
+function decodeHtmlEntities(input: string): string {
+  return input
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+function toPlainText(htmlFragment: string): string {
+  return decodeHtmlEntities(htmlFragment)
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractIngredients(html: string): string[] {
+  const ingredientsSectionMatch = html.match(
+    /<h[1-6][^>]*>\s*ingredients?\s*<\/h[1-6]>\s*<ul[^>]*>([\s\S]*?)<\/ul>/i
+  );
+  const ulContent =
+    ingredientsSectionMatch?.[1] ?? html.match(/<ul[^>]*>([\s\S]*?)<\/ul>/i)?.[1];
+
+  if (!ulContent) {
+    return [];
+  }
+
+  const items = Array.from(ulContent.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi))
+    .map((match) => toPlainText(match[1]))
+    .filter(Boolean);
+
+  return items;
+}
+
+function buildReminderButtonHtml(title: string, ingredients: string[]): string {
+  const shortcutName = (
+    process.env.SHOPPING_SHORTCUT_NAME?.trim() || DEFAULT_SHORTCUT_NAME
+  ).trim();
+  const listTitle = title || 'Recipe Ingredients';
+  const reminderText = `${listTitle}:\n${ingredients
+    .map((ingredient) => `- ${ingredient}`)
+    .join('\n')}`;
+  const href =
+    `shortcuts://run-shortcut?name=${encodeURIComponent(shortcutName)}` +
+    `&input=text&text=${encodeURIComponent(reminderText)}`;
+
+  return `
+<div class="reminder-action" style="margin:12px 0 20px;">
+  <a
+    href="${href}"
+    style="display:inline-block;padding:10px 14px;border-radius:999px;background:#111827;color:#ffffff;text-decoration:none;font:600 14px/1.2 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
+  >
+    Add Ingredients To Reminders
+  </a>
+  <p style="margin:8px 0 0;color:#6b7280;font:500 12px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+    iPhone Shortcuts required.
+  </p>
+</div>`;
+}
+
+function injectReminderButton(html: string, title: string): string {
+  if (html.includes('shortcuts://run-shortcut')) {
+    return html;
+  }
+
+  const ingredients = extractIngredients(html);
+  if (ingredients.length === 0) {
+    return html;
+  }
+
+  const reminderButton = buildReminderButtonHtml(title, ingredients);
+
+  if (/<\/h1>/i.test(html)) {
+    return html.replace(/<\/h1>/i, `</h1>${reminderButton}`);
+  }
+
+  if (/<body[^>]*>/i.test(html)) {
+    return html.replace(/<body[^>]*>/i, (match) => `${match}${reminderButton}`);
+  }
+
+  return `${reminderButton}${html}`;
 }
 
 function getModelCandidates(): string[] {
@@ -123,8 +207,10 @@ export async function processRecipe(
 
     try {
       const result = await model.generateContent(parts);
-      const html = stripCodeFences(result.response.text());
-      return { html, title: extractTitle(html) };
+      const rawHtml = stripCodeFences(result.response.text());
+      const title = extractTitle(rawHtml);
+      const html = injectReminderButton(rawHtml, title);
+      return { html, title };
     } catch (error) {
       if (isModelUnavailableError(error)) {
         lastModelError = error;

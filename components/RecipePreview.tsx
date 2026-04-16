@@ -10,7 +10,10 @@ interface RecipePreviewProps {
 }
 
 export function RecipePreview({ html, title, onReset }: RecipePreviewProps) {
-  const cleanHtml = DOMPurify.sanitize(html);
+  const cleanHtml = DOMPurify.sanitize(html, {
+    ALLOWED_URI_REGEXP:
+      /^(?:(?:https?|mailto|tel|shortcuts):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+  });
 
   function handleDownload() {
     const blob = new Blob([html], { type: 'text/html' });
