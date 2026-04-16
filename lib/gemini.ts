@@ -210,6 +210,19 @@ function isModelUnavailableError(error: unknown): boolean {
   );
 }
 
+function isModelOverloadedError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+
+  const status = (error as { status?: number }).status;
+  const message = error.message.toLowerCase();
+
+  return (
+    status === 503 ||
+    message.includes('service unavailable') ||
+    message.includes('high demand')
+  );
+}
+
 export async function processRecipe(
   caption: string,
   videoFileUri?: string,
@@ -244,7 +257,7 @@ export async function processRecipe(
       const html = injectReminderButton(rawHtml, title);
       return { html, title };
     } catch (error) {
-      if (isModelUnavailableError(error)) {
+      if (isModelUnavailableError(error) || isModelOverloadedError(error)) {
         lastModelError = error;
         continue;
       }

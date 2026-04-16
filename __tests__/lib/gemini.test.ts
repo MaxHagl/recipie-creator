@@ -88,6 +88,27 @@ describe('processRecipe', () => {
     );
   });
 
+  it('falls back to another model when primary model is overloaded (503)', async () => {
+    mockGenerateContent
+      .mockRejectedValueOnce(
+        Object.assign(new Error('Service Unavailable: model high demand'), { status: 503 })
+      )
+      .mockResolvedValueOnce({
+        response: { text: () => '<html><body><h1>Overload Fallback</h1></body></html>' },
+      });
+
+    const result = await processRecipe('fallback caption');
+    expect(result.title).toBe('Overload Fallback');
+    expect(mockGetGenerativeModel).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ model: 'gemini-2.5-flash' })
+    );
+    expect(mockGetGenerativeModel).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ model: 'gemini-flash-latest' })
+    );
+  });
+
   it('injects a shortcuts reminder button with all ingredients', async () => {
     mockGenerateContent.mockResolvedValue({
       response: {

@@ -182,4 +182,20 @@ describe('POST /api/extract', () => {
     const data = await res.json();
     expect(data.error.toLowerCase()).toContain('quota');
   });
+
+  it('returns 503 with Retry-After header when Gemini is overloaded', async () => {
+    mockAuth();
+    mockScrape.mockResolvedValue({ caption: 'pasta recipe', videoUrl: null });
+    mockProcess.mockRejectedValue(
+      Object.assign(new Error('Service Unavailable: model high demand'), {
+        status: 503,
+      })
+    );
+
+    const res = await POST(makeRequest({ url: 'https://www.instagram.com/p/abc123/' }));
+    expect(res.status).toBe(503);
+    expect(res.headers.get('retry-after')).toBe('30');
+    const data = await res.json();
+    expect(data.error.toLowerCase()).toContain('temporarily busy');
+  });
 });

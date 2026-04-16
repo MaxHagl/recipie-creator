@@ -54,6 +54,21 @@ function isGeminiQuotaError(error: unknown): boolean {
   );
 }
 
+function isGeminiOverloadedError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const status = (error as { status?: number }).status;
+  const message = error.message.toLowerCase();
+
+  return (
+    status === 503 ||
+    message.includes('service unavailable') ||
+    message.includes('high demand')
+  );
+}
+
 function getRetryAfterSeconds(error: unknown): number | undefined {
   if (!(error instanceof Error)) {
     return undefined;
@@ -179,6 +194,20 @@ export async function POST(request: Request) {
             retryAfterSeconds !== undefined
               ? { 'Retry-After': String(retryAfterSeconds) }
               : undefined,
+        }
+      );
+    }
+
+    if (isGeminiOverloadedError(error)) {
+      const retryAfterSeconds = getRetryAfterSeconds(error) ?? 30;
+      return NextResponse.json(
+        {
+          error:
+            'Gemini is temporarily busy right now. Please retry shortly.',
+        },
+        {
+          status: 503,
+          headers: { 'Retry-After': String(retryAfterSeconds) },
         }
       );
     }
