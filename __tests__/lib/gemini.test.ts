@@ -143,6 +143,43 @@ describe('processRecipe', () => {
     expect(mockGenerateContent).toHaveBeenCalledTimes(2);
   });
 
+  it('retries recipe extraction when no-recipe fallback is returned despite recipe signals', async () => {
+    mockGenerateContent
+      .mockResolvedValueOnce({
+        response: {
+          text: () =>
+            '<!DOCTYPE html><html><body><h1>Not found</h1><p>No recipe found in this post.</p></body></html>',
+        },
+      })
+      .mockResolvedValueOnce({
+        response: {
+          text: () =>
+            '<!DOCTYPE html><html><body><h1>Garlic Chicken</h1><h2>Ingredients</h2><ul><li>2 chicken thighs</li><li>1 tbsp oil</li></ul><h2>Instructions</h2><ol><li>Season chicken.</li><li>Sear in oil.</li><li>Cook through and serve.</li></ol></body></html>',
+        },
+      });
+
+    const result = await processRecipe(
+      'Ingredients: 2 chicken thighs, 1 tbsp oil. Cook in pan until done.'
+    );
+
+    expect(result.title).toBe('Garlic Chicken');
+    expect(result.html).toContain('<h2>Instructions</h2>');
+    expect(mockGenerateContent).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not force retry for clearly non-recipe text', async () => {
+    mockGenerateContent.mockResolvedValue({
+      response: {
+        text: () =>
+          '<!DOCTYPE html><html><body><h1>Not found</h1><p>No recipe found in this post.</p></body></html>',
+      },
+    });
+
+    const result = await processRecipe('Check out this sunset and travel clip');
+    expect(result.title).toBe('Not found');
+    expect(mockGenerateContent).toHaveBeenCalledTimes(1);
+  });
+
   it('injects a shortcuts reminder button with all ingredients', async () => {
     mockGenerateContent.mockResolvedValue({
       response: {

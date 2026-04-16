@@ -9,6 +9,70 @@ function normalizeText(value: string | null | undefined): string {
   return (value ?? '').replace(/\s+/g, ' ').trim();
 }
 
+const RECIPE_HINT_RE =
+  /\b(recipe|ingredients?|instructions?|servings?|prep|cook|bake|fry|boil|simmer|saute|grill|mix|stir|whisk|marinate|zutaten|zubereitung|ingredientes?|instrucciones?)\b/i;
+const MEASUREMENT_HINT_RE =
+  /\b\d+\s*(?:\/\s*\d+)?\s*(?:g|kg|ml|l|oz|lb|lbs|cup|cups|tbsp|tsp|teaspoons?|tablespoons?)\b/i;
+const GENERIC_INSTAGRAM_RE = /\b(?:likes?|comments?)\b[\s\S]*\bon instagram\b/i;
+
+function decodeEscapedCaptionValue(rawValue: string): string {
+  return rawValue
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex: string) =>
+      String.fromCharCode(Number.parseInt(hex, 16))
+    )
+    .replace(/\\n|\\r|\\t/g, ' ')
+    .replace(/\\"/g, '"')
+    .replace(/\\\//g, '/')
+    .replace(/\\\\/g, '\\');
+}
+
+function extractQuotedInstagramCaption(value: string): string | null {
+  const quotedMatch = value.match(/on instagram:\s*[“"](.+?)[”"]\s*$/i);
+  if (quotedMatch?.[1]) {
+    const normalized = normalizeText(quotedMatch[1]);
+    return normalized.length > 0 ? normalized : null;
+  }
+
+  return null;
+}
+
+function captionQualityScore(value: string): number {
+  const normalized = normalizeText(value);
+  if (!normalized) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  let score = 0;
+
+  if (RECIPE_HINT_RE.test(normalized)) score += 3;
+  if (MEASUREMENT_HINT_RE.test(normalized)) score += 3;
+  if (normalized.length >= 80) score += 1;
+  if (GENERIC_INSTAGRAM_RE.test(normalized)) score -= 2;
+  if (/^instagram$/i.test(normalized)) score -= 5;
+
+  return score;
+}
+
+function selectBestCaption(candidates: Array<string | null | undefined>): string {
+  const unique = [...new Set(candidates.map((value) => normalizeText(value)).filter(Boolean))];
+  if (unique.length === 0) {
+    return '';
+  }
+
+  let best = unique[0];
+  let bestScore = captionQualityScore(best);
+
+  for (const candidate of unique.slice(1)) {
+    const score = captionQualityScore(candidate);
+    if (score > bestScore || (score === bestScore && candidate.length > best.length)) {
+      best = candidate;
+      bestScore = score;
+    }
+  }
+
+  return best;
+}
+
 async function getMetaContent(
   page: Page,
   selector: string
@@ -29,12 +93,9 @@ async function getJsonLdDescription(
   page: Page
 ): Promise<string | null> {
   try {
-    const value = await page.$eval(
+    const values = await page.$$eval(
       'script[type="application/ld+json"]',
-      (el) => {
-        const raw = el.textContent ?? '';
-        if (!raw) return '';
-
+      (els) => {
         const collectDescriptions = (node: unknown): string[] => {
           if (!node || typeof node !== 'object') return [];
           if (Array.isArray(node)) {
@@ -58,18 +119,55 @@ async function getJsonLdDescription(
           return descriptions;
         };
 
-        try {
-          const parsed = JSON.parse(raw);
-          const descriptions = collectDescriptions(parsed).filter(Boolean);
-          return descriptions[0] ?? '';
-        } catch {
-          return '';
+        const extracted: string[] = [];
+        for (const el of els) {
+          const raw = el.textContent ?? '';
+          if (!raw) continue;
+
+          try {
+            const parsed = JSON.parse(raw);
+            extracted.push(...collectDescriptions(parsed).filter(Boolean));
+          } catch {
+            // Skip malformed JSON-LD block.
+          }
         }
+
+        return extracted;
       }
     );
 
-    const normalized = normalizeText(value);
-    return normalized.length > 0 ? normalized : null;
+    const best = selectBestCaption(values);
+    return best.length > 0 ? best : null;
+  } catch {
+    return null;
+  }
+}
+
+async function getEmbeddedCaptionFallback(
+  page: Page
+): Promise<string | null> {
+  try {
+    const html = await page.content();
+    const patterns = [
+      /"edge_media_to_caption"\s*:\s*\{"edges"\s*:\s*\[\{"node"\s*:\s*\{"text"\s*:\s*"((?:\\.|[^"\\])+)"/gi,
+      /"accessibility_caption"\s*:\s*"((?:\\.|[^"\\])+)"/gi,
+      /"caption"\s*:\s*"((?:\\.|[^"\\])+)"/gi,
+      /"description"\s*:\s*"((?:\\.|[^"\\])+)"/gi,
+    ];
+
+    const candidates: string[] = [];
+    for (const pattern of patterns) {
+      for (const match of html.matchAll(pattern)) {
+        const value = decodeEscapedCaptionValue(match[1] ?? '');
+        const normalized = normalizeText(value);
+        if (normalized.length >= 24) {
+          candidates.push(normalized);
+        }
+      }
+    }
+
+    const best = selectBestCaption(candidates);
+    return best.length > 0 ? best : null;
   } catch {
     return null;
   }
@@ -108,12 +206,26 @@ export async function scrapeInstagram(url: string): Promise<ScrapeResult> {
       // Cookie popup not found or dismissed — continue
     }
 
-    const caption =
-      (await getMetaContent(page, 'meta[property="og:description"]')) ||
-      (await getMetaContent(page, 'meta[name="description"]')) ||
-      (await getMetaContent(page, 'meta[property="twitter:description"]')) ||
-      (await getJsonLdDescription(page)) ||
-      normalizeText(await page.title().catch(() => ''));
+    const ogDescription = await getMetaContent(page, 'meta[property="og:description"]');
+    const metaDescription = await getMetaContent(page, 'meta[name="description"]');
+    const twitterDescription = await getMetaContent(
+      page,
+      'meta[property="twitter:description"]'
+    );
+    const jsonLdDescription = await getJsonLdDescription(page);
+    const embeddedFallback = await getEmbeddedCaptionFallback(page);
+    const pageTitle = normalizeText(await page.title().catch(() => ''));
+
+    const caption = selectBestCaption([
+      extractQuotedInstagramCaption(ogDescription ?? ''),
+      extractQuotedInstagramCaption(metaDescription ?? ''),
+      ogDescription,
+      metaDescription,
+      twitterDescription,
+      jsonLdDescription,
+      embeddedFallback,
+      pageTitle,
+    ]);
 
     const videoUrl = await page
       .$eval(

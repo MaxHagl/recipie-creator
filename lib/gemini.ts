@@ -93,6 +93,29 @@ Return a full valid HTML recipe document with a non-empty ordered Instructions l
 Minimum 3 instruction steps for a recipe.
 
 Return ONLY full HTML.`;
+const RECIPE_RECOVERY_PROMPT = `Your previous response said "No recipe found in this post."
+
+Re-check the source carefully. If there are any food/cooking signals (ingredients, quantities, cooking actions, dish context), produce a complete best-effort recipe HTML.
+Do not fail just because some values are missing. Infer practical details conservatively.
+
+Return ONLY full HTML. No markdown or commentary.`;
+const RECIPE_RECOVERY_PROMPT_STRONG = `The source still appears recipe-related.
+
+You must return a complete recipe HTML with:
+- clear title
+- ingredients list
+- instructions list with at least 3 steps
+- estimated calories per serving
+
+Only return "No recipe found in this post." when the source is clearly not food/cooking content.
+Return ONLY full HTML.`;
+const RECIPE_SIGNAL_PATTERNS = [
+  /\b(recipe|ingredients?|instructions?|servings?|prep|cook|bake|fry|boil|simmer|saute|grill|mix|stir|whisk|marinate)\b/i,
+  /\b(zutaten|anleitung|zubereitung|portionen|kochen|braten|backen)\b/i,
+  /\b(ingredientes?|instrucciones?|porciones?|cocinar|freir|hornear|mezclar)\b/i,
+  /\b\d+\s*(?:\/\s*\d+)?\s*(?:g|kg|ml|l|oz|lb|lbs|cup|cups|tbsp|tsp|teaspoons?|tablespoons?)\b/i,
+  /\b(chicken|beef|pork|fish|egg|eggs|flour|sugar|salt|pepper|onion|garlic|tomato|cheese|butter|oil|rice|pasta|taco|potato|avocado|beans?)\b/i,
+];
 
 function extractTitle(html: string): string {
   const match = html.match(/<h1[^>]*>(.*?)<\/h1>/i);
@@ -152,6 +175,79 @@ async function ensureInstructionSteps(
     {
       text:
         `${INSTRUCTIONS_REPAIR_PROMPT_STRONG}\n\n` +
+        `Previous HTML output:\n${repaired}`,
+    },
+  ];
+
+  return stripCodeFences(
+    (await model.generateContent(strongerRepairParts)).response.text()
+  );
+}
+
+function getTextParts(parts: Part[]): string {
+  return parts
+    .flatMap((part) =>
+      'text' in part && typeof part.text === 'string' ? [part.text] : []
+    )
+    .join('\n');
+}
+
+function hasRecipeSignals(input: string): boolean {
+  const normalized = input.trim();
+  if (!normalized) {
+    return false;
+  }
+
+  let score = 0;
+  for (const pattern of RECIPE_SIGNAL_PATTERNS) {
+    if (pattern.test(normalized)) {
+      score += 1;
+    }
+  }
+
+  if (
+    /\b(likes?|comments?|follow|instagram|reel|share this)\b/i.test(normalized) &&
+    score <= 1
+  ) {
+    score -= 1;
+  }
+
+  return score >= 2;
+}
+
+async function ensureRecipeRecoveredWhenRelevant(
+  model: { generateContent: (parts: Part[]) => Promise<{ response: { text: () => string } }> },
+  originalParts: Part[],
+  html: string
+): Promise<string> {
+  if (!isNoRecipeFoundHtml(html)) {
+    return html;
+  }
+
+  const sourceText = getTextParts(originalParts);
+  if (!hasRecipeSignals(sourceText)) {
+    return html;
+  }
+
+  const repairParts: Part[] = [
+    ...originalParts,
+    {
+      text:
+        `${RECIPE_RECOVERY_PROMPT}\n\n` +
+        `Previous HTML output:\n${html}`,
+    },
+  ];
+
+  const repaired = stripCodeFences((await model.generateContent(repairParts)).response.text());
+  if (!isNoRecipeFoundHtml(repaired)) {
+    return repaired;
+  }
+
+  const strongerRepairParts: Part[] = [
+    ...originalParts,
+    {
+      text:
+        `${RECIPE_RECOVERY_PROMPT_STRONG}\n\n` +
         `Previous HTML output:\n${repaired}`,
     },
   ];
@@ -333,7 +429,12 @@ export async function processRecipe(
     try {
       const result = await model.generateContent(parts);
       const initialHtml = stripCodeFences(result.response.text());
-      const rawHtml = await ensureInstructionSteps(model, parts, initialHtml);
+      const recoveredHtml = await ensureRecipeRecoveredWhenRelevant(
+        model,
+        parts,
+        initialHtml
+      );
+      const rawHtml = await ensureInstructionSteps(model, parts, recoveredHtml);
       const title = extractTitle(rawHtml);
       const html = injectReminderButton(rawHtml, title);
       return { html, title };

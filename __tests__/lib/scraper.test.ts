@@ -13,7 +13,8 @@ function makeBrowser(overrides: Partial<{
   ogCaption: string | null;
   metaDescription: string | null;
   twitterDescription: string | null;
-  jsonLdDescription: string | null;
+  jsonLdDescriptions: string[];
+  embeddedCaption: string | null;
   pageTitle: string;
   videoUrl: string | null;
   cookieVisible: boolean;
@@ -22,7 +23,8 @@ function makeBrowser(overrides: Partial<{
     ogCaption = 'Test caption',
     metaDescription = null,
     twitterDescription = null,
-    jsonLdDescription = null,
+    jsonLdDescriptions = [],
+    embeddedCaption = null,
     pageTitle = '',
     videoUrl = null,
     cookieVisible = false,
@@ -37,6 +39,22 @@ function makeBrowser(overrides: Partial<{
       }),
     }),
     title: jest.fn().mockResolvedValue(pageTitle),
+    content: jest.fn().mockResolvedValue(
+      embeddedCaption
+        ? `{"edge_media_to_caption":{"edges":[{"node":{"text":"${embeddedCaption}"}}]}}`
+        : '<html></html>'
+    ),
+    $$eval: jest.fn().mockImplementation((selector: string, pageFn: (els: Array<{
+      textContent: string | null;
+    }>) => unknown) => {
+      if (selector.includes('application/ld+json')) {
+        const elements = jsonLdDescriptions.map((description) => ({
+          textContent: JSON.stringify({ description }),
+        }));
+        return Promise.resolve(pageFn(elements));
+      }
+      return Promise.resolve(pageFn([]));
+    }),
     $eval: jest.fn().mockImplementation((selector: string, pageFn: (el: {
       getAttribute: (name: string) => string | null;
       textContent: string | null;
@@ -60,13 +78,6 @@ function makeBrowser(overrides: Partial<{
         return Promise.resolve(pageFn({
           getAttribute: () => twitterDescription,
           textContent: null,
-        }));
-      }
-      if (selector.includes('application/ld+json')) {
-        if (jsonLdDescription == null) return Promise.reject(new Error('not found'));
-        return Promise.resolve(pageFn({
-          getAttribute: () => null,
-          textContent: JSON.stringify({ description: jsonLdDescription }),
         }));
       }
       if (selector.includes('og:video')) {
@@ -115,6 +126,45 @@ describe('scrapeInstagram', () => {
 
     const result = await scrapeInstagram('https://www.instagram.com/p/abc123/');
     expect(result.caption).toBe('Fallback description caption');
+  });
+
+  it('extracts quoted caption from Instagram-style meta description', async () => {
+    const { browser } = makeBrowser({
+      ogCaption:
+        '1,234 likes, 20 comments - account on Instagram: "2 chicken thighs + 1 tbsp oil. Pan fry until golden."',
+    });
+    mockLaunch.mockResolvedValue(browser);
+
+    const result = await scrapeInstagram('https://www.instagram.com/p/abc123/');
+    expect(result.caption).toBe('2 chicken thighs + 1 tbsp oil. Pan fry until golden.');
+  });
+
+  it('uses json-ld when meta descriptions are unavailable', async () => {
+    const { browser } = makeBrowser({
+      ogCaption: null,
+      metaDescription: null,
+      twitterDescription: null,
+      jsonLdDescriptions: ['Ingredients: 200g pasta, 1 cup sauce. Cook and serve.'],
+    });
+    mockLaunch.mockResolvedValue(browser);
+
+    const result = await scrapeInstagram('https://www.instagram.com/p/abc123/');
+    expect(result.caption).toContain('Ingredients: 200g pasta');
+  });
+
+  it('uses embedded caption fallback when structured meta fields are missing', async () => {
+    const { browser } = makeBrowser({
+      ogCaption: null,
+      metaDescription: null,
+      twitterDescription: null,
+      jsonLdDescriptions: [],
+      embeddedCaption: 'Cook pasta with tomato sauce and cheese',
+      pageTitle: 'Instagram',
+    });
+    mockLaunch.mockResolvedValue(browser);
+
+    const result = await scrapeInstagram('https://www.instagram.com/reel/abc123/');
+    expect(result.caption).toContain('Cook pasta with tomato sauce');
   });
 
   it('returns videoUrl when og:video meta tag exists', async () => {
