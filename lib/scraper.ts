@@ -173,6 +173,40 @@ async function getEmbeddedCaptionFallback(
   }
 }
 
+function decodeEscapedUrl(rawValue: string): string {
+  return decodeEscapedCaptionValue(rawValue).replace(/\\u0026/g, '&');
+}
+
+async function getEmbeddedVideoUrlFallback(
+  page: Page
+): Promise<string | null> {
+  try {
+    const html = await page.content();
+    const patterns = [
+      /"video_url"\s*:\s*"((?:\\.|[^"\\])+?)"/gi,
+      /"contentUrl"\s*:\s*"((?:\\.|[^"\\])+?)"/gi,
+      /"playback_url"\s*:\s*"((?:\\.|[^"\\])+?)"/gi,
+    ];
+
+    for (const pattern of patterns) {
+      const match = pattern.exec(html);
+      pattern.lastIndex = 0;
+      if (!match?.[1]) {
+        continue;
+      }
+
+      const decoded = decodeEscapedUrl(match[1]).trim();
+      if (/^https?:\/\//i.test(decoded)) {
+        return decoded;
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function scrapeInstagram(url: string): Promise<ScrapeResult> {
   const browser = await chromium.launch({ headless: true });
 
@@ -227,12 +261,13 @@ export async function scrapeInstagram(url: string): Promise<ScrapeResult> {
       pageTitle,
     ]);
 
-    const videoUrl = await page
+    const metaVideoUrl = await page
       .$eval(
         'meta[property="og:video:secure_url"], meta[property="og:video"]',
         (el) => (el as HTMLMetaElement).getAttribute('content') ?? null
       )
       .catch(() => null);
+    const videoUrl = metaVideoUrl || (await getEmbeddedVideoUrlFallback(page));
 
     return { caption, videoUrl };
   } finally {

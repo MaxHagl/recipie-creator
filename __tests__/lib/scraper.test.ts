@@ -15,6 +15,7 @@ function makeBrowser(overrides: Partial<{
   twitterDescription: string | null;
   jsonLdDescriptions: string[];
   embeddedCaption: string | null;
+  embeddedVideoUrl: string | null;
   pageTitle: string;
   videoUrl: string | null;
   cookieVisible: boolean;
@@ -25,10 +26,21 @@ function makeBrowser(overrides: Partial<{
     twitterDescription = null,
     jsonLdDescriptions = [],
     embeddedCaption = null,
+    embeddedVideoUrl = null,
     pageTitle = '',
     videoUrl = null,
     cookieVisible = false,
   } = overrides;
+
+  const embeddedJsonParts: string[] = [];
+  if (embeddedCaption) {
+    embeddedJsonParts.push(
+      `"edge_media_to_caption":{"edges":[{"node":{"text":"${embeddedCaption}"}}]}`
+    );
+  }
+  if (embeddedVideoUrl) {
+    embeddedJsonParts.push(`"video_url":"${embeddedVideoUrl}"`);
+  }
 
   const page = {
     goto: jest.fn().mockResolvedValue(undefined),
@@ -40,8 +52,8 @@ function makeBrowser(overrides: Partial<{
     }),
     title: jest.fn().mockResolvedValue(pageTitle),
     content: jest.fn().mockResolvedValue(
-      embeddedCaption
-        ? `{"edge_media_to_caption":{"edges":[{"node":{"text":"${embeddedCaption}"}}]}}`
+      embeddedJsonParts.length > 0
+        ? `{${embeddedJsonParts.join(',')}}`
         : '<html></html>'
     ),
     $$eval: jest.fn().mockImplementation((selector: string, pageFn: (els: Array<{
@@ -173,6 +185,17 @@ describe('scrapeInstagram', () => {
 
     const result = await scrapeInstagram('https://www.instagram.com/reel/abc123/');
     expect(result.videoUrl).toBe('https://example.com/video.mp4');
+  });
+
+  it('falls back to embedded video_url when og:video meta is missing', async () => {
+    const { browser } = makeBrowser({
+      videoUrl: null,
+      embeddedVideoUrl: 'https://cdn.instagram.com/path/video.mp4',
+    });
+    mockLaunch.mockResolvedValue(browser);
+
+    const result = await scrapeInstagram('https://www.instagram.com/reel/abc123/');
+    expect(result.videoUrl).toBe('https://cdn.instagram.com/path/video.mp4');
   });
 
   it('closes browser even if page throws', async () => {

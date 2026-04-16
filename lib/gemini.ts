@@ -11,6 +11,11 @@ RECIPE EXTRACTION RULES
 3) Normalize ambiguous shorthand where reasonable (e.g., "tsp", "tbsp", "oz", fractions).
 4) If details are missing, keep language conservative and do not invent highly specific facts.
 5) Input may be in English, German, or Spanish. You must correctly interpret all three.
+6) When a reel video is provided, actively extract recipe details from:
+   - spoken narration (audio/transcription)
+   - on-screen text overlays/subtitles
+   - visible ingredient/action cues in frames
+7) Do not rely on caption alone when video evidence contains recipe instructions.
 
 LANGUAGE HANDLING (required)
 - Always output the final recipe in English only.
@@ -115,6 +120,24 @@ You must return a complete recipe HTML with:
 - estimated calories per serving
 
 Only return "No recipe found in this post." when the source is clearly not food/cooking content.
+Return ONLY full HTML.`;
+const VIDEO_RECIPE_RECOVERY_PROMPT = `A reel video file is available. Re-analyze the video deeply for recipe content.
+
+Required focus:
+- spoken narration/audio instructions
+- on-screen text/captions/subtitles
+- ingredient mentions and quantities
+- cooking actions and sequence
+
+Input may be English, German, or Spanish. Translate all final output to English.
+If the recipe exists mainly in spoken or on-screen content, still produce the full recipe HTML.
+
+Return ONLY full HTML. No markdown or commentary.`;
+const VIDEO_RECIPE_RECOVERY_PROMPT_STRONG = `Video-focused re-check required.
+
+You must use the reel's spoken + on-screen content to extract a recipe when present.
+Only return "No recipe found in this post." if the video truly contains no cooking/recipe content.
+
 Return ONLY full HTML.`;
 const DATE_NIGHT_MODE_PROMPT = `DATE NIGHT MODE IS ENABLED.
 
@@ -264,22 +287,31 @@ function hasRecipeSignals(input: string): boolean {
 async function ensureRecipeRecoveredWhenRelevant(
   model: { generateContent: (parts: Part[]) => Promise<{ response: { text: () => string } }> },
   originalParts: Part[],
-  html: string
+  html: string,
+  hasVideoInput: boolean
 ): Promise<string> {
   if (!isNoRecipeFoundHtml(html)) {
     return html;
   }
 
   const sourceText = getTextParts(originalParts);
-  if (!hasRecipeSignals(sourceText)) {
+  const likelyRecipeFromText = hasRecipeSignals(sourceText);
+  if (!likelyRecipeFromText && !hasVideoInput) {
     return html;
   }
+
+  const primaryRecoveryPrompt = hasVideoInput
+    ? VIDEO_RECIPE_RECOVERY_PROMPT
+    : RECIPE_RECOVERY_PROMPT;
+  const secondaryRecoveryPrompt = hasVideoInput
+    ? VIDEO_RECIPE_RECOVERY_PROMPT_STRONG
+    : RECIPE_RECOVERY_PROMPT_STRONG;
 
   const repairParts: Part[] = [
     ...originalParts,
     {
       text:
-        `${RECIPE_RECOVERY_PROMPT}\n\n` +
+        `${primaryRecoveryPrompt}\n\n` +
         `Previous HTML output:\n${html}`,
     },
   ];
@@ -293,7 +325,7 @@ async function ensureRecipeRecoveredWhenRelevant(
     ...originalParts,
     {
       text:
-        `${RECIPE_RECOVERY_PROMPT_STRONG}\n\n` +
+        `${secondaryRecoveryPrompt}\n\n` +
         `Previous HTML output:\n${repaired}`,
     },
   ];
@@ -500,6 +532,7 @@ export async function processRecipe(
   options: ProcessRecipeOptions = {}
 ): Promise<RecipeResult> {
   const parts: Part[] = [];
+  const hasVideoInput = Boolean(videoFileUri && videoMimeType);
 
   if (videoFileUri && videoMimeType) {
     parts.push({ fileData: { mimeType: videoMimeType, fileUri: videoFileUri } });
@@ -531,7 +564,8 @@ export async function processRecipe(
       const recoveredHtml = await ensureRecipeRecoveredWhenRelevant(
         model,
         parts,
-        initialHtml
+        initialHtml,
+        hasVideoInput
       );
       const instructionsCheckedHtml = await ensureInstructionSteps(
         model,

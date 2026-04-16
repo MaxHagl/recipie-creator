@@ -184,6 +184,57 @@ describe('processRecipe', () => {
     expect(mockGenerateContent).toHaveBeenCalledTimes(2);
   });
 
+  it('retries from video input even when caption text has weak recipe signals', async () => {
+    mockGenerateContent
+      .mockResolvedValueOnce({
+        response: {
+          text: () =>
+            '<!DOCTYPE html><html><body><h1>Not found</h1><p>No recipe found in this post.</p></body></html>',
+        },
+      })
+      .mockResolvedValueOnce({
+        response: {
+          text: () =>
+            '<!DOCTYPE html><html><body><h1>Spoken Recipe</h1><h2>Ingredients</h2><ul><li>2 eggs</li></ul><h2>Instructions</h2><ol><li>Beat eggs.</li><li>Cook in pan.</li><li>Serve warm.</li></ol></body></html>',
+        },
+      });
+
+    const result = await processRecipe(
+      'wow nice reel',
+      'https://files.gemini/video',
+      'video/mp4'
+    );
+
+    expect(result.title).toBe('Spoken Recipe');
+    expect(mockGenerateContent).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses video-focused recovery prompt when video is provided', async () => {
+    mockGenerateContent
+      .mockResolvedValueOnce({
+        response: {
+          text: () =>
+            '<!DOCTYPE html><html><body><h1>Not found</h1><p>No recipe found in this post.</p></body></html>',
+        },
+      })
+      .mockResolvedValueOnce({
+        response: {
+          text: () =>
+            '<!DOCTYPE html><html><body><h1>Recovered</h1><h2>Instructions</h2><ol><li>Step 1</li><li>Step 2</li><li>Step 3</li></ol></body></html>',
+        },
+      });
+
+    await processRecipe('weak caption', 'https://files.gemini/video', 'video/mp4');
+
+    const secondCallArgs = mockGenerateContent.mock.calls[1][0];
+    const videoRecoveryPrompt = secondCallArgs.find(
+      (part: { text?: string }) =>
+        typeof part.text === 'string' &&
+        part.text.includes('A reel video file is available')
+    );
+    expect(videoRecoveryPrompt).toBeDefined();
+  });
+
   it('does not force retry for clearly non-recipe text', async () => {
     mockGenerateContent.mockResolvedValue({
       response: {
