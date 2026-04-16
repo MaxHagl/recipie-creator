@@ -72,6 +72,10 @@ export interface RecipeResult {
   title: string;
 }
 
+export interface ProcessRecipeOptions {
+  dateNightMode?: boolean;
+}
+
 const DEFAULT_SHORTCUT_NAME = 'AddHTMLTask';
 const DEFAULT_MODEL_CANDIDATES = [
   'gemini-2.5-flash',
@@ -112,6 +116,35 @@ You must return a complete recipe HTML with:
 
 Only return "No recipe found in this post." when the source is clearly not food/cooking content.
 Return ONLY full HTML.`;
+const DATE_NIGHT_MODE_PROMPT = `DATE NIGHT MODE IS ENABLED.
+
+Add a dedicated collaboration section titled exactly:
+"Date Night Plan: Max + Franca"
+
+Rules for this section:
+- Keep the normal recipe ingredients and instructions intact.
+- Add two clear task lists, one for "Max" and one for "Franca".
+- Split work in a balanced parallel flow so both people stay active.
+- Include explicit handoff/sync points.
+- End with a shared finish step where both plate/serve together.
+- Do not add this section when no recipe is found.`;
+const DATE_NIGHT_REPAIR_PROMPT = `Date Night mode is enabled, but the HTML is missing a complete collaboration section.
+
+Rewrite and return the full recipe HTML, preserving the recipe, and add:
+- heading: "Date Night Plan: Max + Franca"
+- a clear "Max" task list
+- a clear "Franca" task list
+- explicit handoff/sync points
+- shared final plating/serve step
+
+Return ONLY full HTML.`;
+const DATE_NIGHT_REPAIR_PROMPT_STRONG = `Date Night mode is still incomplete.
+
+Return a full valid recipe HTML that includes a complete:
+"Date Night Plan: Max + Franca"
+with balanced, parallel tasks for Max and Franca and a shared finish step.
+
+Return ONLY full HTML.`;
 const RECIPE_SIGNAL_PATTERNS = [
   /\b(recipe|ingredients?|instructions?|servings?|prep|cook|bake|fry|boil|simmer|saute|grill|mix|stir|whisk|marinate)\b/i,
   /\b(zutaten|anleitung|zubereitung|portionen|kochen|braten|backen)\b/i,
@@ -134,6 +167,16 @@ function stripCodeFences(text: string): string {
 
 function isNoRecipeFoundHtml(html: string): boolean {
   return /no recipe found in this post/i.test(html);
+}
+
+function hasDateNightPlan(html: string): boolean {
+  const plain = toPlainText(html).toLowerCase();
+
+  return (
+    plain.includes('date night plan') &&
+    /\bmax\b/i.test(plain) &&
+    /\bfranca\b/i.test(plain)
+  );
 }
 
 function hasInstructionSteps(html: string): boolean {
@@ -251,6 +294,44 @@ async function ensureRecipeRecoveredWhenRelevant(
     {
       text:
         `${RECIPE_RECOVERY_PROMPT_STRONG}\n\n` +
+        `Previous HTML output:\n${repaired}`,
+    },
+  ];
+
+  return stripCodeFences(
+    (await model.generateContent(strongerRepairParts)).response.text()
+  );
+}
+
+async function ensureDateNightPlan(
+  model: { generateContent: (parts: Part[]) => Promise<{ response: { text: () => string } }> },
+  originalParts: Part[],
+  html: string,
+  enabled: boolean
+): Promise<string> {
+  if (!enabled || isNoRecipeFoundHtml(html) || hasDateNightPlan(html)) {
+    return html;
+  }
+
+  const repairParts: Part[] = [
+    ...originalParts,
+    {
+      text:
+        `${DATE_NIGHT_REPAIR_PROMPT}\n\n` +
+        `Previous HTML output:\n${html}`,
+    },
+  ];
+
+  const repaired = stripCodeFences((await model.generateContent(repairParts)).response.text());
+  if (isNoRecipeFoundHtml(repaired) || hasDateNightPlan(repaired)) {
+    return repaired;
+  }
+
+  const strongerRepairParts: Part[] = [
+    ...originalParts,
+    {
+      text:
+        `${DATE_NIGHT_REPAIR_PROMPT_STRONG}\n\n` +
         `Previous HTML output:\n${repaired}`,
     },
   ];
@@ -415,7 +496,8 @@ function isModelOverloadedError(error: unknown): boolean {
 export async function processRecipe(
   caption: string,
   videoFileUri?: string,
-  videoMimeType?: string
+  videoMimeType?: string,
+  options: ProcessRecipeOptions = {}
 ): Promise<RecipeResult> {
   const parts: Part[] = [];
 
@@ -425,6 +507,10 @@ export async function processRecipe(
 
   if (caption) {
     parts.push({ text: `Caption: ${caption}` });
+  }
+
+  if (options.dateNightMode) {
+    parts.push({ text: DATE_NIGHT_MODE_PROMPT });
   }
 
   if (parts.length === 0) throw new Error('No content to process');
@@ -447,7 +533,18 @@ export async function processRecipe(
         parts,
         initialHtml
       );
-      const rawHtml = await ensureInstructionSteps(model, parts, recoveredHtml);
+      const instructionsCheckedHtml = await ensureInstructionSteps(
+        model,
+        parts,
+        recoveredHtml
+      );
+      const dateNightCheckedHtml = await ensureDateNightPlan(
+        model,
+        parts,
+        instructionsCheckedHtml,
+        options.dateNightMode === true
+      );
+      const rawHtml = await ensureInstructionSteps(model, parts, dateNightCheckedHtml);
       const title = extractTitle(rawHtml);
       const html = injectReminderButton(rawHtml, title);
       return { html, title };

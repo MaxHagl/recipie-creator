@@ -80,6 +80,44 @@ export function extractPotentialUrlFromPayload(payload: unknown): string | null 
   return null;
 }
 
+export function extractBooleanFlagFromPayload(
+  payload: unknown,
+  keys: string[]
+): boolean {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return false;
+  }
+
+  const record = payload as Record<string, unknown>;
+
+  for (const key of keys) {
+    if (!Object.hasOwn(record, key)) {
+      continue;
+    }
+
+    const value = record[key];
+    if (typeof value === 'boolean') {
+      return value;
+    }
+
+    if (typeof value === 'number') {
+      return value === 1;
+    }
+
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on') {
+        return true;
+      }
+      if (normalized === 'false' || normalized === '0' || normalized === 'no' || normalized === 'off') {
+        return false;
+      }
+    }
+  }
+
+  return false;
+}
+
 function extractCanonicalPathFromSegments(segments: string[]): string | null {
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i]?.toLowerCase();

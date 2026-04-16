@@ -70,9 +70,29 @@ describe('POST /api/extract/share', () => {
 
     expect(res.status).toBe(200);
     expect(mockScrape).toHaveBeenCalledWith('https://www.instagram.com/reel/DW7wNS3Ev8r/');
+    expect(mockProcess).toHaveBeenCalledWith('pasta recipe', undefined, undefined, {
+      dateNightMode: false,
+    });
     const data = await res.json();
     expect(data.title).toBe('Pasta');
     expect(data.normalizedUrl).toBe('https://www.instagram.com/reel/DW7wNS3Ev8r/');
+  });
+
+  it('forwards dateNightMode=true to processRecipe', async () => {
+    mockScrape.mockResolvedValue({ caption: 'pasta recipe', videoUrl: null });
+    mockProcess.mockResolvedValue({ html: '<h1>Pasta</h1>', title: 'Pasta' });
+
+    const res = await POST(
+      makeRequest({
+        url: 'https://www.instagram.com/p/abc123/',
+        dateNightMode: true,
+      })
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockProcess).toHaveBeenCalledWith('pasta recipe', undefined, undefined, {
+      dateNightMode: true,
+    });
   });
 
   it('accepts text blobs that contain an Instagram URL', async () => {
@@ -146,6 +166,8 @@ describe('POST /api/extract/share', () => {
 
     expect(res.status).toBe(200);
     expect(mockUpload).toHaveBeenCalledWith('https://example.com/video.mp4');
-    expect(mockProcess).toHaveBeenCalledWith('fallback caption recipe');
+    expect(mockProcess).toHaveBeenCalledWith('fallback caption recipe', undefined, undefined, {
+      dateNightMode: false,
+    });
   });
 });

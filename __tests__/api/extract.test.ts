@@ -93,6 +93,27 @@ describe('POST /api/extract', () => {
     expect(data.html).toContain('<h1>Pasta</h1>');
     expect(data.title).toBe('Pasta');
     expect(mockUpload).not.toHaveBeenCalled();
+    expect(mockProcess).toHaveBeenCalledWith('pasta recipe', undefined, undefined, {
+      dateNightMode: false,
+    });
+  });
+
+  it('forwards dateNightMode=true to processRecipe', async () => {
+    mockAuth();
+    mockScrape.mockResolvedValue({ caption: 'pasta recipe', videoUrl: null });
+    mockProcess.mockResolvedValue({ html: '<h1>Pasta</h1>', title: 'Pasta' });
+
+    const res = await POST(
+      makeRequest({
+        url: 'https://www.instagram.com/p/abc123/',
+        dateNightMode: true,
+      })
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockProcess).toHaveBeenCalledWith('pasta recipe', undefined, undefined, {
+      dateNightMode: true,
+    });
   });
 
   it('accepts reel share URLs with query params and normalizes before scraping', async () => {
@@ -134,6 +155,12 @@ describe('POST /api/extract', () => {
     const res = await POST(makeRequest({ url: 'https://www.instagram.com/reel/abc123/' }));
     expect(res.status).toBe(200);
     expect(mockUpload).toHaveBeenCalledWith('https://example.com/v.mp4');
+    expect(mockProcess).toHaveBeenCalledWith(
+      'reel recipe',
+      'https://files.gemini/x',
+      'video/mp4',
+      { dateNightMode: false }
+    );
   });
 
   it('falls back to caption-only processing when reel video pipeline fails', async () => {
@@ -151,7 +178,9 @@ describe('POST /api/extract', () => {
     const res = await POST(makeRequest({ url: 'https://www.instagram.com/reel/abc123/' }));
     expect(res.status).toBe(200);
     expect(mockUpload).toHaveBeenCalledWith('https://example.com/v.mp4');
-    expect(mockProcess).toHaveBeenCalledWith('fallback caption recipe');
+    expect(mockProcess).toHaveBeenCalledWith('fallback caption recipe', undefined, undefined, {
+      dateNightMode: false,
+    });
   });
 
   it('returns 500 on scraper crash without leaking error details', async () => {

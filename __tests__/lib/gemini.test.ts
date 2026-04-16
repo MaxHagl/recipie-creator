@@ -224,4 +224,67 @@ describe('processRecipe', () => {
     const result = await processRecipe('soup caption');
     expect(result.html).toContain(encodeURIComponent('Soup:\n- 1-2 tbsp olive oil'));
   });
+
+  it('adds date-night instructions when dateNightMode is enabled', async () => {
+    mockGenerateContent.mockResolvedValue({
+      response: {
+        text: () =>
+          '<!DOCTYPE html><html><body><h1>Pasta Date Night</h1><h2>Ingredients</h2><ul><li>200g pasta</li></ul><h2>Instructions</h2><ol><li>Boil water</li><li>Cook pasta</li><li>Serve</li></ol><h2>Date Night Plan: Max + Franca</h2><h3>Max</h3><ul><li>Boil water</li></ul><h3>Franca</h3><ul><li>Prep sauce</li></ul></body></html>',
+      },
+    });
+
+    await processRecipe('pasta caption', undefined, undefined, {
+      dateNightMode: true,
+    });
+
+    const callArgs = mockGenerateContent.mock.calls[0][0];
+    const promptPart = callArgs.find(
+      (part: { text?: string }) =>
+        typeof part.text === 'string' &&
+        part.text.includes('DATE NIGHT MODE IS ENABLED')
+    );
+    expect(promptPart).toBeDefined();
+  });
+
+  it('repairs missing date-night section when enabled', async () => {
+    mockGenerateContent
+      .mockResolvedValueOnce({
+        response: {
+          text: () =>
+            '<!DOCTYPE html><html><body><h1>Tacos</h1><h2>Ingredients</h2><ul><li>1 lb beef</li></ul><h2>Instructions</h2><ol><li>Cook beef</li><li>Warm tortillas</li><li>Serve</li></ol></body></html>',
+        },
+      })
+      .mockResolvedValueOnce({
+        response: {
+          text: () =>
+            '<!DOCTYPE html><html><body><h1>Tacos</h1><h2>Ingredients</h2><ul><li>1 lb beef</li></ul><h2>Instructions</h2><ol><li>Cook beef</li><li>Warm tortillas</li><li>Serve</li></ol><h2>Date Night Plan: Max + Franca</h2><h3>Max</h3><ul><li>Cook beef.</li><li>Handle final seasoning.</li></ul><h3>Franca</h3><ul><li>Prep toppings.</li><li>Warm tortillas.</li></ul><p>Sync: assemble together and plate at the same time.</p></body></html>',
+        },
+      });
+
+    const result = await processRecipe('taco caption', undefined, undefined, {
+      dateNightMode: true,
+    });
+
+    expect(result.html).toContain('Date Night Plan: Max + Franca');
+    expect(result.html).toContain('Max');
+    expect(result.html).toContain('Franca');
+    expect(mockGenerateContent).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps no-recipe output unchanged in date-night mode', async () => {
+    mockGenerateContent.mockResolvedValue({
+      response: {
+        text: () =>
+          '<!DOCTYPE html><html><body><h1>Not found</h1><p>No recipe found in this post.</p></body></html>',
+      },
+    });
+
+    const result = await processRecipe('completely unrelated text', undefined, undefined, {
+      dateNightMode: true,
+    });
+
+    expect(result.html).toContain('No recipe found in this post.');
+    expect(result.html).not.toContain('Date Night Plan: Max + Franca');
+    expect(mockGenerateContent).toHaveBeenCalledTimes(1);
+  });
 });

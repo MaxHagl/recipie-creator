@@ -5,6 +5,7 @@ import { scrapeInstagram } from '@/lib/scraper';
 import { uploadVideoToGemini } from '@/lib/videoProcessor';
 import { processRecipe } from '@/lib/gemini';
 import {
+  extractBooleanFlagFromPayload,
   extractPotentialUrlFromPayload,
   getRetryAfterSeconds,
   isGeminiOverloadedError,
@@ -77,6 +78,10 @@ export async function POST(request: Request) {
   if (!extractedUrl) {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
+  const dateNightMode = extractBooleanFlagFromPayload(requestBody, [
+    'dateNightMode',
+    'date_night_mode',
+  ]);
 
   const normalizedUrl = normalizeInstagramRecipeUrl(extractedUrl);
   if (!normalizedUrl) {
@@ -97,7 +102,8 @@ export async function POST(request: Request) {
         const { html, title } = await processRecipe(
           caption,
           uploaded.fileUri,
-          uploaded.mimeType
+          uploaded.mimeType,
+          { dateNightMode }
         );
         return NextResponse.json({ html, title, normalizedUrl });
       } catch (videoPipelineError) {
@@ -107,7 +113,9 @@ export async function POST(request: Request) {
             videoPipelineError
           );
           stage = 'gemini';
-          const { html, title } = await processRecipe(caption);
+          const { html, title } = await processRecipe(caption, undefined, undefined, {
+            dateNightMode,
+          });
           return NextResponse.json({ html, title, normalizedUrl });
         }
         throw videoPipelineError;
@@ -115,7 +123,9 @@ export async function POST(request: Request) {
     }
 
     stage = 'gemini';
-    const { html, title } = await processRecipe(caption);
+    const { html, title } = await processRecipe(caption, undefined, undefined, {
+      dateNightMode,
+    });
     return NextResponse.json({ html, title, normalizedUrl });
   } catch (error) {
     console.error('[extract/share]', error);
