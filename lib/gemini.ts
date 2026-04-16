@@ -19,10 +19,8 @@ Review the extracted recipe and correct obvious issues:
 - Cooking realism: temperatures/times should be plausible if present.
 - Duplicates or contradictions should be resolved.
 
-After this check, include a short visible "Recipe Audit" section in the final HTML:
-- 2-4 bullet points.
-- Say what was verified and any assumptions or corrections made.
-- If fully coherent, explicitly say it appears consistent.
+Do this QA pass internally. Apply fixes directly in the recipe output.
+Do NOT include audit notes, QA commentary, assumptions, or correction logs in the final HTML.
 
 OUTPUT FORMAT (strict)
 - Return ONLY valid HTML (no markdown, no explanations, no code fences).
@@ -34,7 +32,7 @@ VISUAL DESIGN REQUIREMENTS
 - Modern, polished card layout suitable for desktop and mobile.
 - Clear typography hierarchy and comfortable spacing.
 - Subtle gradient/page background + elevated main card.
-- Distinct section blocks: Meta, Ingredients, Instructions, Notes, Recipe Audit.
+- Distinct section blocks: Meta, Ingredients, Instructions, Notes.
 - Ingredients as checklist-style list, instructions as numbered steps.
 - Make it look production-ready, print-friendly, and readable.
 
@@ -44,13 +42,11 @@ CONTENT STRUCTURE
 - Ingredients
 - Instructions
 - Notes/Tips (only if present)
-- Recipe Audit (always present when a recipe is found)
 
 NO-RECIPE CASE
 If no recipe can be confidently extracted, return a minimal valid HTML document containing:
 - a title
-- one paragraph: "No recipe found in this post."
-- a Recipe Audit section explaining why extraction failed.`;
+- one paragraph: "No recipe found in this post."`;
 
 export interface RecipeResult {
   html: string;
