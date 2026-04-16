@@ -22,6 +22,15 @@ Review the extracted recipe and correct obvious issues:
 Do this QA pass internally. Apply fixes directly in the recipe output.
 Do NOT include audit notes, QA commentary, assumptions, or correction logs in the final HTML.
 
+CALORIE ESTIMATION (required)
+- Always calculate estimated total calories and calories per serving using explicit ingredient math.
+- Use standard nutritional reference values (USDA-style values) for each ingredient quantity (e.g., kcal per 100g, per tbsp, per piece).
+- Perform arithmetic: ingredient calories -> summed total -> divide by servings.
+- Do not output a calorie number without doing this ingredient-level calculation.
+- If servings are given as a range, output calories per serving as a range.
+- If an ingredient amount is missing/ambiguous, use a conservative standard assumption and still compute.
+- Keep this brief in final output: include only the final calorie estimate line, not the full worksheet.
+
 OUTPUT FORMAT (strict)
 - Return ONLY valid HTML (no markdown, no explanations, no code fences).
 - Full document with <!DOCTYPE html>, <html>, <head>, <body>.
@@ -38,7 +47,7 @@ VISUAL DESIGN REQUIREMENTS
 
 CONTENT STRUCTURE
 - <h1> recipe title
-- metadata row (servings/time if present)
+- metadata row (servings/time if present) that MUST include an estimated calories per serving value
 - Ingredients
 - Instructions
 - Notes/Tips (only if present)
