@@ -122,6 +122,23 @@ describe('processRecipe', () => {
     );
   });
 
+  it('ignores retired gemini-2.0-flash even if configured explicitly', async () => {
+    process.env.GEMINI_MODEL = 'gemini-2.0-flash';
+    mockGenerateContent.mockResolvedValue({
+      response: {
+        text: () =>
+          '<html><body><h1>Modern Model</h1><h2>Instructions</h2><ol><li>Cook</li></ol></body></html>',
+      },
+    });
+
+    const result = await processRecipe('caption');
+    expect(result.title).toBe('Modern Model');
+    expect(mockGetGenerativeModel).toHaveBeenCalledTimes(1);
+    expect(mockGetGenerativeModel).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'gemini-2.5-flash' })
+    );
+  });
+
   it('repairs missing instructions when model omits steps initially', async () => {
     mockGenerateContent
       .mockResolvedValueOnce({

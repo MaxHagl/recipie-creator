@@ -76,7 +76,10 @@ const DEFAULT_SHORTCUT_NAME = 'AddHTMLTask';
 const DEFAULT_MODEL_CANDIDATES = [
   'gemini-2.5-flash',
   'gemini-flash-latest',
-  'gemini-2.0-flash',
+];
+const RETIRED_MODEL_PATTERNS = [
+  /^gemini-2\.0-flash$/i,
+  /^models\/gemini-2\.0-flash$/i,
 ];
 const INSTRUCTIONS_REPAIR_PROMPT = `The previous HTML output is missing complete recipe instructions.
 
@@ -369,7 +372,17 @@ function getModelCandidates(): string[] {
     ? [configured, ...DEFAULT_MODEL_CANDIDATES]
     : [...DEFAULT_MODEL_CANDIDATES];
 
-  return [...new Set(models.filter((model) => model.length > 0))];
+  return [
+    ...new Set(
+      models.filter((model) => {
+        const normalized = model.trim();
+        return (
+          normalized.length > 0 &&
+          !RETIRED_MODEL_PATTERNS.some((pattern) => pattern.test(normalized))
+        );
+      })
+    ),
+  ];
 }
 
 function isModelUnavailableError(error: unknown): boolean {
