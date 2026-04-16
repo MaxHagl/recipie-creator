@@ -231,6 +231,23 @@ describe('scrapeInstagram', () => {
     );
   });
 
+  it('decodes heavily escaped embed video_url values', async () => {
+    const { browser } = makeBrowser({
+      videoUrl: null,
+      embeddedVideoUrl: null,
+      ogCaption: 'Check this reel',
+    });
+    mockLaunch.mockResolvedValue(browser);
+    mockFetch.mockResolvedValue({
+      ok: true,
+      text: async () =>
+        String.raw`{\\\"gql_data\\\":{\\\"shortcode_media\\\":{\\\"video_url\\\":\\\"https:\\\\\\/\\\\\\/cdn.instagram.com\\\\\\/deep\\\\\\/escaped.mp4\\\"}}}`,
+    } as Response);
+
+    const result = await scrapeInstagram('https://www.instagram.com/reel/abc123/');
+    expect(result.videoUrl).toBe('https://cdn.instagram.com/deep/escaped.mp4');
+  });
+
   it('closes browser even if page throws', async () => {
     const { browser, page, context } = makeBrowser();
     page.goto.mockRejectedValue(new Error('Navigation failed'));

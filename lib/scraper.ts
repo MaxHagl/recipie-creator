@@ -196,7 +196,11 @@ function extractFromPatterns(
 }
 
 function decodeEscapedUrl(rawValue: string): string {
-  return decodeEscapedCaptionValue(rawValue).replace(/\\u0026/g, '&');
+  return decodeEscapedCaptionValue(rawValue)
+    // Instagram embeds can escape slashes as \\/ or even \\\/, depending on
+    // where the JSON blob is embedded.
+    .replace(/\\+\//g, '/')
+    .replace(/\\u0026/g, '&');
 }
 
 async function getEmbeddedVideoUrlFallback(
