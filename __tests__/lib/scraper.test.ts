@@ -8,6 +8,9 @@ import { chromium } from 'playwright';
 import { scrapeInstagram } from '@/lib/scraper';
 
 const mockLaunch = chromium.launch as jest.Mock;
+const mockFetch = jest.fn();
+
+global.fetch = mockFetch as typeof fetch;
 
 function makeBrowser(overrides: Partial<{
   ogCaption: string | null;
@@ -118,6 +121,14 @@ function makeBrowser(overrides: Partial<{
 }
 
 describe('scrapeInstagram', () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+    mockFetch.mockResolvedValue({
+      ok: false,
+      text: async () => '',
+    } as Response);
+  });
+
   afterEach(() => jest.clearAllMocks());
 
   it('returns caption from og:description meta tag', async () => {
@@ -196,6 +207,28 @@ describe('scrapeInstagram', () => {
 
     const result = await scrapeInstagram('https://www.instagram.com/reel/abc123/');
     expect(result.videoUrl).toBe('https://cdn.instagram.com/path/video.mp4');
+  });
+
+  it('uses /embed/captioned fallback when page metadata lacks video URL', async () => {
+    const { browser } = makeBrowser({
+      videoUrl: null,
+      embeddedVideoUrl: null,
+      ogCaption: 'Check this reel',
+    });
+    mockLaunch.mockResolvedValue(browser);
+    mockFetch.mockResolvedValue({
+      ok: true,
+      text: async () =>
+        String.raw`{\"gql_data\":{\"shortcode_media\":{\"video_url\":\"https:\\/\\/cdn.instagram.com\\/reel.mp4\",\"edge_media_to_caption\":{\"edges\":[{\"node\":{\"text\":\"Mezcla harina, huevo y leche\"}}]}}}}`,
+    } as Response);
+
+    const result = await scrapeInstagram('https://www.instagram.com/reel/abc123/');
+    expect(result.videoUrl).toBe('https://cdn.instagram.com/reel.mp4');
+    expect(result.caption).toContain('Mezcla harina, huevo y leche');
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://www.instagram.com/reel/abc123/embed/captioned/',
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
   });
 
   it('closes browser even if page throws', async () => {

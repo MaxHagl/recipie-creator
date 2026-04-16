@@ -9,6 +9,13 @@ function normalizeText(value: string | null | undefined): string {
   return (value ?? '').replace(/\s+/g, ' ').trim();
 }
 
+const INSTAGRAM_FETCH_HEADERS = {
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+    '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  Referer: 'https://www.instagram.com/',
+};
+
 const RECIPE_HINT_RE =
   /\b(recipe|ingredients?|instructions?|servings?|prep|cook|bake|fry|boil|simmer|saute|grill|mix|stir|whisk|marinate|zutaten|zubereitung|ingredientes?|instrucciones?)\b/i;
 const MEASUREMENT_HINT_RE =
@@ -173,6 +180,21 @@ async function getEmbeddedCaptionFallback(
   }
 }
 
+function extractFromPatterns(
+  rawText: string,
+  patterns: RegExp[]
+): string | null {
+  for (const pattern of patterns) {
+    const match = pattern.exec(rawText);
+    pattern.lastIndex = 0;
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+
+  return null;
+}
+
 function decodeEscapedUrl(rawValue: string): string {
   return decodeEscapedCaptionValue(rawValue).replace(/\\u0026/g, '&');
 }
@@ -204,6 +226,89 @@ async function getEmbeddedVideoUrlFallback(
     return null;
   } catch {
     return null;
+  }
+}
+
+function buildInstagramEmbedUrl(postUrl: string): string | null {
+  try {
+    const parsed = new URL(postUrl);
+    const segments = parsed.pathname.split('/').filter(Boolean);
+
+    for (let i = 0; i < segments.length; i++) {
+      const kind = segments[i]?.toLowerCase();
+      const code = segments[i + 1];
+      if ((kind === 'reel' || kind === 'p') && code) {
+        return `https://www.instagram.com/${kind}/${code}/embed/captioned/`;
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function getEmbedFallbackData(
+  postUrl: string
+): Promise<{ caption: string | null; videoUrl: string | null }> {
+  const embedUrl = buildInstagramEmbedUrl(postUrl);
+  if (!embedUrl) {
+    return { caption: null, videoUrl: null };
+  }
+
+  try {
+    const response = await fetch(embedUrl, { headers: INSTAGRAM_FETCH_HEADERS });
+    if (!response.ok) {
+      return { caption: null, videoUrl: null };
+    }
+
+    const html = await response.text();
+    const decodedHtml = decodeEscapedCaptionValue(html);
+    const sources = [html, decodedHtml];
+
+    const videoPatterns = [
+      /"video_url"\s*:\s*"((?:\\.|[^"\\])+?)"/i,
+      /\\"video_url\\"\s*:\s*\\"((?:\\\\.|[^"\\])+?)\\"/i,
+      /"playback_url"\s*:\s*"((?:\\.|[^"\\])+?)"/i,
+      /\\"playback_url\\"\s*:\s*\\"((?:\\\\.|[^"\\])+?)\\"/i,
+    ];
+    const captionPatterns = [
+      /"edge_media_to_caption"\s*:\s*\{"edges"\s*:\s*\[\{"node"\s*:\s*\{"text"\s*:\s*"((?:\\.|[^"\\])+?)"/i,
+      /\\"edge_media_to_caption\\"\s*:\s*\{[\s\S]*?\\"text\\"\s*:\s*\\"((?:\\\\.|[^"\\])+?)\\"/i,
+    ];
+
+    let videoUrl: string | null = null;
+    let caption: string | null = null;
+
+    for (const source of sources) {
+      if (!videoUrl) {
+        const rawVideo = extractFromPatterns(source, videoPatterns);
+        if (rawVideo) {
+          const decodedVideo = decodeEscapedUrl(rawVideo).trim();
+          if (/^https?:\/\//i.test(decodedVideo)) {
+            videoUrl = decodedVideo;
+          }
+        }
+      }
+
+      if (!caption) {
+        const rawCaption = extractFromPatterns(source, captionPatterns);
+        if (rawCaption) {
+          const normalized = normalizeText(decodeEscapedCaptionValue(rawCaption));
+          if (normalized.length > 0) {
+            caption = normalized;
+          }
+        }
+      }
+
+      if (videoUrl && caption) {
+        break;
+      }
+    }
+
+    return { caption, videoUrl };
+  } catch {
+    return { caption: null, videoUrl: null };
   }
 }
 
@@ -250,7 +355,7 @@ export async function scrapeInstagram(url: string): Promise<ScrapeResult> {
     const embeddedFallback = await getEmbeddedCaptionFallback(page);
     const pageTitle = normalizeText(await page.title().catch(() => ''));
 
-    const caption = selectBestCaption([
+    const captionCandidates: Array<string | null> = [
       extractQuotedInstagramCaption(ogDescription ?? ''),
       extractQuotedInstagramCaption(metaDescription ?? ''),
       ogDescription,
@@ -259,7 +364,7 @@ export async function scrapeInstagram(url: string): Promise<ScrapeResult> {
       jsonLdDescription,
       embeddedFallback,
       pageTitle,
-    ]);
+    ];
 
     const metaVideoUrl = await page
       .$eval(
@@ -267,7 +372,22 @@ export async function scrapeInstagram(url: string): Promise<ScrapeResult> {
         (el) => (el as HTMLMetaElement).getAttribute('content') ?? null
       )
       .catch(() => null);
-    const videoUrl = metaVideoUrl || (await getEmbeddedVideoUrlFallback(page));
+    let videoUrl = metaVideoUrl || (await getEmbeddedVideoUrlFallback(page));
+
+    // Public reel HTML can omit direct video metadata. Fall back to the
+    // embed endpoint, which frequently still carries `video_url`.
+    const initialCaption = selectBestCaption(captionCandidates);
+    if (!videoUrl || captionQualityScore(initialCaption) <= 0) {
+      const embedFallback = await getEmbedFallbackData(url);
+      if (embedFallback.caption) {
+        captionCandidates.push(embedFallback.caption);
+      }
+      if (!videoUrl && embedFallback.videoUrl) {
+        videoUrl = embedFallback.videoUrl;
+      }
+    }
+
+    const caption = selectBestCaption(captionCandidates);
 
     return { caption, videoUrl };
   } finally {
