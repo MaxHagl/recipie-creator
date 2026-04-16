@@ -82,16 +82,39 @@ function stripCodeFences(text: string): string {
 }
 
 function decodeHtmlEntities(input: string): string {
+  const namedEntities: Record<string, string> = {
+    amp: '&',
+    lt: '<',
+    gt: '>',
+    quot: '"',
+    apos: "'",
+    nbsp: ' ',
+    ndash: '-',
+    mdash: '-',
+    hellip: '...',
+    frac14: '1/4',
+    frac12: '1/2',
+    frac34: '3/4',
+  };
+
   return input
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
+    .replace(/&([a-zA-Z]+);/g, (match, entityName: string) => {
+      const normalized = namedEntities[entityName.toLowerCase()];
+      return normalized ?? match;
+    })
+    .replace(/&#(\d+);/g, (match, codePoint: string) => {
+      const value = Number.parseInt(codePoint, 10);
+      return Number.isNaN(value) ? match : String.fromCodePoint(value);
+    })
+    .replace(/&#x([\da-fA-F]+);/g, (match, hexCodePoint: string) => {
+      const value = Number.parseInt(hexCodePoint, 16);
+      return Number.isNaN(value) ? match : String.fromCodePoint(value);
+    });
 }
 
 function toPlainText(htmlFragment: string): string {
   return decodeHtmlEntities(htmlFragment)
+    .replace(/[\u2012-\u2015]/g, '-')
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();

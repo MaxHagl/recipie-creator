@@ -95,6 +95,21 @@ describe('POST /api/extract', () => {
     expect(mockUpload).not.toHaveBeenCalled();
   });
 
+  it('accepts reel share URLs with query params and normalizes before scraping', async () => {
+    mockAuth();
+    mockScrape.mockResolvedValue({ caption: 'reel recipe', videoUrl: null });
+    mockProcess.mockResolvedValue({ html: '<h1>Reel Recipe</h1>', title: 'Reel Recipe' });
+
+    const res = await POST(
+      makeRequest({
+        url: 'https://www.instagram.com/reel/DW7wNS3Ev8r/?igsh=cWxlcjR1M3U1cDV4',
+      })
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockScrape).toHaveBeenCalledWith('https://www.instagram.com/reel/DW7wNS3Ev8r/');
+  });
+
   it('uploads video when scraper returns a videoUrl', async () => {
     mockAuth();
     mockScrape.mockResolvedValue({ caption: 'reel recipe', videoUrl: 'https://example.com/v.mp4' });

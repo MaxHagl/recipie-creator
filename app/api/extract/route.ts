@@ -6,8 +6,37 @@ import { scrapeInstagram } from '@/lib/scraper';
 import { uploadVideoToGemini } from '@/lib/videoProcessor';
 import { processRecipe } from '@/lib/gemini';
 
-const INSTAGRAM_URL_RE =
-  /^https:\/\/www\.instagram\.com\/(p|reel)\/[A-Za-z0-9_-]+\/?$/;
+const INSTAGRAM_CODE_RE = /^[A-Za-z0-9_-]+$/;
+
+function normalizeInstagramRecipeUrl(rawUrl: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+
+  if (parsed.protocol !== 'https:') {
+    return null;
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  if (host !== 'www.instagram.com' && host !== 'instagram.com') {
+    return null;
+  }
+
+  const pathSegments = parsed.pathname.split('/').filter(Boolean);
+  if (pathSegments.length !== 2) {
+    return null;
+  }
+
+  const [contentType, shortcode] = pathSegments;
+  if ((contentType !== 'p' && contentType !== 'reel') || !INSTAGRAM_CODE_RE.test(shortcode)) {
+    return null;
+  }
+
+  return `https://www.instagram.com/${contentType}/${shortcode}/`;
+}
 
 function isGeminiQuotaError(error: unknown): boolean {
   if (!(error instanceof Error)) {
@@ -84,14 +113,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
-  if (!url || !INSTAGRAM_URL_RE.test(url)) {
+  const normalizedUrl = normalizeInstagramRecipeUrl(url);
+
+  if (!normalizedUrl) {
     return NextResponse.json({ error: 'Invalid Instagram URL' }, { status: 400 });
   }
 
   let stage: 'scrape' | 'video' | 'gemini' = 'scrape';
 
   try {
-    const { caption, videoUrl } = await scrapeInstagram(url);
+    const { caption, videoUrl } = await scrapeInstagram(normalizedUrl);
 
     if (videoUrl) {
       stage = 'video';

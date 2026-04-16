@@ -103,4 +103,16 @@ describe('processRecipe', () => {
       encodeURIComponent('Tacos:\n- 1 lb beef\n- 2 tortillas')
     );
   });
+
+  it('normalizes HTML entities in ingredients for reminders payload', async () => {
+    mockGenerateContent.mockResolvedValue({
+      response: {
+        text: () =>
+          '<!DOCTYPE html><html><body><h1>Soup</h1><h2>Ingredients</h2><ul><li>1&ndash;2 tbsp olive oil</li></ul></body></html>',
+      },
+    });
+
+    const result = await processRecipe('soup caption');
+    expect(result.html).toContain(encodeURIComponent('Soup:\n- 1-2 tbsp olive oil'));
+  });
 });
