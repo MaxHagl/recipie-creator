@@ -1,9 +1,64 @@
 const INSTAGRAM_CODE_RE = /^[A-Za-z0-9_-]+$/;
+const EMBEDDED_URL_RE = /https?:\/\/[^\s<>"')\]]+/gi;
+
+function findFirstUrlCandidate(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  try {
+    // Already a raw URL.
+    // eslint-disable-next-line no-new
+    new URL(trimmed);
+    return trimmed;
+  } catch {
+    // Continue and try extracting URL from a text blob.
+  }
+
+  const matches = trimmed.match(EMBEDDED_URL_RE) ?? [];
+  for (const rawMatch of matches) {
+    const cleaned = rawMatch.replace(/[.,!?;:]+$/g, '');
+    try {
+      // eslint-disable-next-line no-new
+      new URL(cleaned);
+      return cleaned;
+    } catch {
+      // Keep scanning.
+    }
+  }
+
+  return null;
+}
+
+function extractCanonicalPathFromSegments(segments: string[]): string | null {
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i]?.toLowerCase();
+    const next = segments[i + 1];
+    const nextNext = segments[i + 2];
+
+    if ((seg === 'p' || seg === 'reel') && next && INSTAGRAM_CODE_RE.test(next)) {
+      return `/${seg}/${next}/`;
+    }
+
+    if (
+      seg === 'share' &&
+      (next?.toLowerCase() === 'p' || next?.toLowerCase() === 'reel') &&
+      nextNext &&
+      INSTAGRAM_CODE_RE.test(nextNext)
+    ) {
+      return `/${next.toLowerCase()}/${nextNext}/`;
+    }
+  }
+
+  return null;
+}
 
 export function normalizeInstagramRecipeUrl(rawUrl: string): string | null {
+  const candidate = findFirstUrlCandidate(rawUrl);
+  if (!candidate) return null;
+
   let parsed: URL;
   try {
-    parsed = new URL(rawUrl);
+    parsed = new URL(candidate);
   } catch {
     return null;
   }
@@ -13,21 +68,18 @@ export function normalizeInstagramRecipeUrl(rawUrl: string): string | null {
   }
 
   const host = parsed.hostname.toLowerCase();
-  if (host !== 'www.instagram.com' && host !== 'instagram.com') {
+  if (host === 'l.instagram.com') {
+    const wrapped = parsed.searchParams.get('u');
+    return wrapped ? normalizeInstagramRecipeUrl(wrapped) : null;
+  }
+
+  if (host !== 'www.instagram.com' && host !== 'instagram.com' && host !== 'm.instagram.com') {
     return null;
   }
 
   const pathSegments = parsed.pathname.split('/').filter(Boolean);
-  if (pathSegments.length !== 2) {
-    return null;
-  }
-
-  const [contentType, shortcode] = pathSegments;
-  if ((contentType !== 'p' && contentType !== 'reel') || !INSTAGRAM_CODE_RE.test(shortcode)) {
-    return null;
-  }
-
-  return `https://www.instagram.com/${contentType}/${shortcode}/`;
+  const canonicalPath = extractCanonicalPathFromSegments(pathSegments);
+  return canonicalPath ? `https://www.instagram.com${canonicalPath}` : null;
 }
 
 export function isGeminiQuotaError(error: unknown): boolean {

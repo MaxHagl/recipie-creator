@@ -110,6 +110,21 @@ describe('POST /api/extract', () => {
     expect(mockScrape).toHaveBeenCalledWith('https://www.instagram.com/reel/DW7wNS3Ev8r/');
   });
 
+  it('accepts Instagram share path format and normalizes to canonical reel URL', async () => {
+    mockAuth();
+    mockScrape.mockResolvedValue({ caption: 'reel recipe', videoUrl: null });
+    mockProcess.mockResolvedValue({ html: '<h1>Reel Recipe</h1>', title: 'Reel Recipe' });
+
+    const res = await POST(
+      makeRequest({
+        url: 'https://www.instagram.com/share/reel/DW7wNS3Ev8r/?igsh=abc',
+      })
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockScrape).toHaveBeenCalledWith('https://www.instagram.com/reel/DW7wNS3Ev8r/');
+  });
+
   it('uploads video when scraper returns a videoUrl', async () => {
     mockAuth();
     mockScrape.mockResolvedValue({ caption: 'reel recipe', videoUrl: 'https://example.com/v.mp4' });
