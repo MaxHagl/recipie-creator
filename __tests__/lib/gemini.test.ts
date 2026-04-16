@@ -30,6 +30,7 @@ describe('processRecipe', () => {
     const result = await processRecipe('pasta recipe caption');
     expect(result.html).toContain('<h1>Pasta Carbonara</h1>');
     expect(result.title).toBe('Pasta Carbonara');
+    expect(result.hasRecipe).toBe(true);
   });
 
   it('strips markdown code fences from response', async () => {
@@ -52,6 +53,7 @@ describe('processRecipe', () => {
 
     const result = await processRecipe('random caption');
     expect(result.title).toBe('');
+    expect(result.hasRecipe).toBe(false);
   });
 
   it('includes fileData part when videoFileUri is provided', async () => {

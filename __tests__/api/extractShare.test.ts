@@ -158,6 +158,7 @@ describe('POST /api/extract/share', () => {
     mockProcess.mockResolvedValue({
       html: '<h1>Fallback</h1>',
       title: 'Fallback',
+      hasRecipe: true,
     });
 
     const res = await POST(
@@ -169,5 +170,27 @@ describe('POST /api/extract/share', () => {
     expect(mockProcess).toHaveBeenCalledWith('fallback caption recipe', undefined, undefined, {
       dateNightMode: false,
     });
+  });
+
+  it('returns 503 when reel video processing fails and caption fallback has no recipe', async () => {
+    mockScrape.mockResolvedValue({
+      caption: 'fallback caption no recipe',
+      videoUrl: 'https://example.com/video.mp4',
+    });
+    mockUpload.mockRejectedValue(new Error('video upload failed'));
+    mockProcess.mockResolvedValue({
+      html: '<h1>Not found</h1><p>No recipe found in this post.</p>',
+      title: 'Not found',
+      hasRecipe: false,
+    });
+
+    const res = await POST(
+      makeRequest({ url: 'https://www.instagram.com/reel/abc123/' })
+    );
+
+    expect(res.status).toBe(503);
+    expect(res.headers.get('retry-after')).toBe('30');
+    const data = await res.json();
+    expect(data.error).toContain('Could not analyze reel video content');
   });
 });

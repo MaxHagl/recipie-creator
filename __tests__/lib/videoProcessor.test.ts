@@ -1,3 +1,6 @@
+const mockUploadFile = jest.fn();
+const mockGetFile = jest.fn();
+
 jest.mock('@google/generative-ai/server', () => ({
   FileState: {
     PROCESSING: 'PROCESSING',
@@ -5,14 +8,8 @@ jest.mock('@google/generative-ai/server', () => ({
     FAILED: 'FAILED',
   },
   GoogleAIFileManager: jest.fn().mockImplementation(() => ({
-    uploadFile: jest.fn().mockResolvedValue({
-      file: {
-        name: 'files/abc',
-        uri: 'https://files.gemini/abc',
-        mimeType: 'video/mp4',
-      },
-    }),
-    getFile: jest.fn().mockResolvedValue({ state: 'ACTIVE' }),
+    uploadFile: mockUploadFile,
+    getFile: mockGetFile,
   })),
 }));
 
@@ -33,9 +30,21 @@ describe('uploadVideoToGemini', () => {
       ok: true,
       arrayBuffer: jest.fn().mockResolvedValue(new ArrayBuffer(8)),
     });
+    mockUploadFile.mockResolvedValue({
+      file: {
+        name: 'files/abc',
+        uri: 'https://files.gemini/abc',
+        mimeType: 'video/mp4',
+      },
+    });
+    mockGetFile.mockResolvedValue({ state: 'ACTIVE' });
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.clearAllMocks();
+  });
 
   it('returns fileUri and mimeType on success', async () => {
     const result = await uploadVideoToGemini('https://example.com/video.mp4');
@@ -48,5 +57,57 @@ describe('uploadVideoToGemini', () => {
     await expect(uploadVideoToGemini('https://bad.url/video.mp4')).rejects.toThrow(
       'Failed to download video'
     );
+  });
+
+  it('retries transient download failures and eventually succeeds', async () => {
+    mockFetch
+      .mockResolvedValueOnce({ ok: false, status: 503 })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: jest.fn().mockResolvedValue(new ArrayBuffer(8)),
+      });
+
+    const result = await uploadVideoToGemini('https://example.com/video.mp4');
+    expect(result.fileUri).toBe('https://files.gemini/abc');
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries transient upload failures and eventually succeeds', async () => {
+    mockUploadFile
+      .mockRejectedValueOnce(
+        Object.assign(new Error('upload temporarily unavailable'), { status: 503 })
+      )
+      .mockResolvedValueOnce({
+        file: {
+          name: 'files/abc',
+          uri: 'https://files.gemini/abc',
+          mimeType: 'video/mp4',
+        },
+      });
+
+    const result = await uploadVideoToGemini('https://example.com/video.mp4');
+    expect(result.fileUri).toBe('https://files.gemini/abc');
+    expect(mockUploadFile).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries file readiness checks and succeeds after transient error', async () => {
+    mockGetFile
+      .mockRejectedValueOnce(new Error('temporary network issue while polling status'))
+      .mockResolvedValueOnce({ state: 'ACTIVE' });
+
+    const result = await uploadVideoToGemini('https://example.com/video.mp4');
+    expect(result.fileUri).toBe('https://files.gemini/abc');
+    expect(mockGetFile).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails with clear error after upload retries are exhausted', async () => {
+    mockUploadFile.mockRejectedValue(
+      Object.assign(new Error('upload temporarily unavailable'), { status: 503 })
+    );
+
+    await expect(uploadVideoToGemini('https://example.com/video.mp4')).rejects.toThrow(
+      'upload temporarily unavailable'
+    );
+    expect(mockUploadFile).toHaveBeenCalledTimes(3);
   });
 });

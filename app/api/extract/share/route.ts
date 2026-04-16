@@ -113,10 +113,27 @@ export async function POST(request: Request) {
             videoPipelineError
           );
           stage = 'gemini';
-          const { html, title } = await processRecipe(caption, undefined, undefined, {
+          const fallbackResult = await processRecipe(caption, undefined, undefined, {
             dateNightMode,
           });
-          return NextResponse.json({ html, title, normalizedUrl });
+
+          if (fallbackResult.hasRecipe) {
+            return NextResponse.json({
+              html: fallbackResult.html,
+              title: fallbackResult.title,
+              normalizedUrl,
+            });
+          }
+
+          return NextResponse.json(
+            {
+              error: 'Could not analyze reel video content. Please retry in a moment.',
+            },
+            {
+              status: 503,
+              headers: { 'Retry-After': '30' },
+            }
+          );
         }
         throw videoPipelineError;
       }

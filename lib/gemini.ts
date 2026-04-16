@@ -75,6 +75,7 @@ If no recipe can be confidently extracted, return a minimal valid HTML document 
 export interface RecipeResult {
   html: string;
   title: string;
+  hasRecipe: boolean;
 }
 
 export interface ProcessRecipeOptions {
@@ -581,7 +582,8 @@ export async function processRecipe(
       const rawHtml = await ensureInstructionSteps(model, parts, dateNightCheckedHtml);
       const title = extractTitle(rawHtml);
       const html = injectReminderButton(rawHtml, title);
-      return { html, title };
+      const hasRecipe = !isNoRecipeFoundHtml(rawHtml);
+      return { html, title, hasRecipe };
     } catch (error) {
       if (isModelUnavailableError(error) || isModelOverloadedError(error)) {
         lastModelError = error;
