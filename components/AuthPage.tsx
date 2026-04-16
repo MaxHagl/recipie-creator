@@ -14,17 +14,22 @@ export function AuthPage() {
     setLoading(true);
     setError('');
 
-    const res = await fetch('/api/auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password }),
-    });
+    try {
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
 
-    if (res.ok) {
-      setLoading(false);
-      router.refresh();
-    } else {
+      if (res.ok) {
+        router.refresh();
+        return;
+      }
+
       setError('Invalid password');
+    } catch {
+      setError('Unable to sign in right now. Please try again.');
+    } finally {
       setLoading(false);
     }
   }
@@ -42,6 +47,7 @@ export function AuthPage() {
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Enter password"
             className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-400"
+            autoComplete="current-password"
             autoFocus
           />
           {error && <p className="text-red-500 text-sm">{error}</p>}

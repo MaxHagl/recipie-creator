@@ -43,6 +43,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid Instagram URL' }, { status: 400 });
   }
 
+  let stage: 'scrape' | 'video' | 'gemini' = 'scrape';
+
   try {
     const { caption, videoUrl } = await scrapeInstagram(url);
 
@@ -50,11 +52,13 @@ export async function POST(request: Request) {
     let videoMimeType: string | undefined;
 
     if (videoUrl) {
+      stage = 'video';
       const uploaded = await uploadVideoToGemini(videoUrl);
       videoFileUri = uploaded.fileUri;
       videoMimeType = uploaded.mimeType;
     }
 
+    stage = 'gemini';
     const { html, title } = await processRecipe(caption, videoFileUri, videoMimeType);
     return NextResponse.json({ html, title });
   } catch (error) {
@@ -65,6 +69,10 @@ export async function POST(request: Request) {
         { error: 'Could not access this post. It may be private.' },
         { status: 422 }
       );
+    }
+
+    if (stage === 'video' || stage === 'gemini') {
+      return NextResponse.json({ error: 'Failed to process recipe.' }, { status: 500 });
     }
 
     return NextResponse.json({ error: 'Failed to fetch the page.' }, { status: 500 });

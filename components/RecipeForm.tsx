@@ -37,6 +37,8 @@ export function RecipeForm({ onResult }: RecipeFormProps) {
       } else {
         setError(data.error ?? 'Something went wrong.');
       }
+    } catch {
+      setError('Something went wrong. Please try again.');
     } finally {
       clearTimeout(timer);
       setLoading(false);
