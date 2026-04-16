@@ -10,11 +10,23 @@ import { scrapeInstagram } from '@/lib/scraper';
 const mockLaunch = chromium.launch as jest.Mock;
 
 function makeBrowser(overrides: Partial<{
-  caption: string;
+  ogCaption: string | null;
+  metaDescription: string | null;
+  twitterDescription: string | null;
+  jsonLdDescription: string | null;
+  pageTitle: string;
   videoUrl: string | null;
   cookieVisible: boolean;
 }> = {}) {
-  const { caption = 'Test caption', videoUrl = null, cookieVisible = false } = overrides;
+  const {
+    ogCaption = 'Test caption',
+    metaDescription = null,
+    twitterDescription = null,
+    jsonLdDescription = null,
+    pageTitle = '',
+    videoUrl = null,
+    cookieVisible = false,
+  } = overrides;
 
   const page = {
     goto: jest.fn().mockResolvedValue(undefined),
@@ -24,9 +36,47 @@ function makeBrowser(overrides: Partial<{
         click: jest.fn().mockResolvedValue(undefined),
       }),
     }),
-    $eval: jest.fn().mockImplementation((selector: string) => {
-      if (selector.includes('og:description')) return Promise.resolve(caption);
-      if (selector.includes('og:video')) return videoUrl ? Promise.resolve(videoUrl) : Promise.reject(new Error('not found'));
+    title: jest.fn().mockResolvedValue(pageTitle),
+    $eval: jest.fn().mockImplementation((selector: string, pageFn: (el: {
+      getAttribute: (name: string) => string | null;
+      textContent: string | null;
+    }) => unknown) => {
+      if (selector.includes('og:description')) {
+        if (ogCaption == null) return Promise.reject(new Error('not found'));
+        return Promise.resolve(pageFn({
+          getAttribute: () => ogCaption,
+          textContent: null,
+        }));
+      }
+      if (selector.includes('meta[name="description"]')) {
+        if (metaDescription == null) return Promise.reject(new Error('not found'));
+        return Promise.resolve(pageFn({
+          getAttribute: () => metaDescription,
+          textContent: null,
+        }));
+      }
+      if (selector.includes('twitter:description')) {
+        if (twitterDescription == null) return Promise.reject(new Error('not found'));
+        return Promise.resolve(pageFn({
+          getAttribute: () => twitterDescription,
+          textContent: null,
+        }));
+      }
+      if (selector.includes('application/ld+json')) {
+        if (jsonLdDescription == null) return Promise.reject(new Error('not found'));
+        return Promise.resolve(pageFn({
+          getAttribute: () => null,
+          textContent: JSON.stringify({ description: jsonLdDescription }),
+        }));
+      }
+      if (selector.includes('og:video')) {
+        return videoUrl
+          ? Promise.resolve(pageFn({
+            getAttribute: () => videoUrl,
+            textContent: null,
+          }))
+          : Promise.reject(new Error('not found'));
+      }
       return Promise.reject(new Error('unknown selector'));
     }),
   };
@@ -48,12 +98,23 @@ describe('scrapeInstagram', () => {
   afterEach(() => jest.clearAllMocks());
 
   it('returns caption from og:description meta tag', async () => {
-    const { browser } = makeBrowser({ caption: 'Pasta recipe here' });
+    const { browser } = makeBrowser({ ogCaption: 'Pasta recipe here' });
     mockLaunch.mockResolvedValue(browser);
 
     const result = await scrapeInstagram('https://www.instagram.com/p/abc123/');
     expect(result.caption).toBe('Pasta recipe here');
     expect(result.videoUrl).toBeNull();
+  });
+
+  it('falls back to description meta when og:description is missing', async () => {
+    const { browser } = makeBrowser({
+      ogCaption: null,
+      metaDescription: 'Fallback description caption',
+    });
+    mockLaunch.mockResolvedValue(browser);
+
+    const result = await scrapeInstagram('https://www.instagram.com/p/abc123/');
+    expect(result.caption).toBe('Fallback description caption');
   });
 
   it('returns videoUrl when og:video meta tag exists', async () => {
