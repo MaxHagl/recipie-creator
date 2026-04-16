@@ -143,4 +143,28 @@ describe('POST /api/extract', () => {
     const data = await res.json();
     expect(data.error).toContain('private');
   });
+
+  it('returns 429 with Retry-After header when Gemini quota is exceeded', async () => {
+    mockAuth();
+    mockScrape.mockResolvedValue({ caption: 'pasta recipe', videoUrl: null });
+    const quotaError = Object.assign(
+      new Error('Please retry in 36.84s. Quota exceeded.'),
+      {
+        status: 429,
+        errorDetails: [
+          {
+            '@type': 'type.googleapis.com/google.rpc.RetryInfo',
+            retryDelay: '36s',
+          },
+        ],
+      }
+    );
+    mockProcess.mockRejectedValue(quotaError);
+
+    const res = await POST(makeRequest({ url: 'https://www.instagram.com/p/abc123/' }));
+    expect(res.status).toBe(429);
+    expect(res.headers.get('retry-after')).toBe('36');
+    const data = await res.json();
+    expect(data.error.toLowerCase()).toContain('quota');
+  });
 });

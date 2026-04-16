@@ -23,6 +23,12 @@ export interface RecipeResult {
   title: string;
 }
 
+const DEFAULT_MODEL_CANDIDATES = [
+  'gemini-2.5-flash',
+  'gemini-flash-latest',
+  'gemini-2.0-flash',
+];
+
 function extractTitle(html: string): string {
   const match = html.match(/<h1[^>]*>(.*?)<\/h1>/i);
   return match ? match[1].replace(/<[^>]+>/g, '').trim() : '';
@@ -33,6 +39,29 @@ function stripCodeFences(text: string): string {
     .replace(/^```(?:html)?\s*/i, '')
     .replace(/\s*```$/i, '')
     .trim();
+}
+
+function getModelCandidates(): string[] {
+  const configured = process.env.GEMINI_MODEL?.trim();
+  const models = configured
+    ? [configured, ...DEFAULT_MODEL_CANDIDATES]
+    : [...DEFAULT_MODEL_CANDIDATES];
+
+  return [...new Set(models.filter((model) => model.length > 0))];
+}
+
+function isModelUnavailableError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+
+  const status = (error as { status?: number }).status;
+  const message = error.message.toLowerCase();
+
+  return (
+    status === 404 &&
+    (message.includes('no longer available') ||
+      message.includes('not found') ||
+      message.includes('model'))
+  );
 }
 
 export async function processRecipe(
@@ -53,13 +82,31 @@ export async function processRecipe(
   if (parts.length === 0) throw new Error('No content to process');
 
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-2.0-flash',
-    systemInstruction: SYSTEM_PROMPT,
-  });
+  const modelCandidates = getModelCandidates();
+  let lastModelError: unknown;
 
-  const result = await model.generateContent(parts);
-  const html = stripCodeFences(result.response.text());
+  for (const modelName of modelCandidates) {
+    const model = genAI.getGenerativeModel({
+      model: modelName,
+      systemInstruction: SYSTEM_PROMPT,
+    });
 
-  return { html, title: extractTitle(html) };
+    try {
+      const result = await model.generateContent(parts);
+      const html = stripCodeFences(result.response.text());
+      return { html, title: extractTitle(html) };
+    } catch (error) {
+      if (isModelUnavailableError(error)) {
+        lastModelError = error;
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  if (lastModelError instanceof Error) {
+    throw lastModelError;
+  }
+
+  throw new Error('No usable Gemini model found');
 }

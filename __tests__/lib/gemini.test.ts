@@ -1,10 +1,11 @@
 const mockGenerateContent = jest.fn();
+const mockGetGenerativeModel = jest.fn().mockReturnValue({
+  generateContent: mockGenerateContent,
+});
 
 jest.mock('@google/generative-ai', () => ({
   GoogleGenerativeAI: jest.fn().mockImplementation(() => ({
-    getGenerativeModel: jest.fn().mockReturnValue({
-      generateContent: mockGenerateContent,
-    }),
+    getGenerativeModel: mockGetGenerativeModel,
   })),
 }));
 
@@ -13,6 +14,7 @@ import { processRecipe } from '@/lib/gemini';
 describe('processRecipe', () => {
   beforeEach(() => {
     process.env.GEMINI_API_KEY = 'test-key';
+    delete process.env.GEMINI_MODEL;
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -63,5 +65,26 @@ describe('processRecipe', () => {
 
   it('throws if no content is provided', async () => {
     await expect(processRecipe('')).rejects.toThrow('No content to process');
+  });
+
+  it('falls back to another model when the primary model is unavailable', async () => {
+    mockGenerateContent
+      .mockRejectedValueOnce(
+        Object.assign(new Error('model is no longer available'), { status: 404 })
+      )
+      .mockResolvedValueOnce({
+        response: { text: () => '<html><body><h1>Fallback Model</h1></body></html>' },
+      });
+
+    const result = await processRecipe('fallback caption');
+    expect(result.title).toBe('Fallback Model');
+    expect(mockGetGenerativeModel).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ model: 'gemini-2.5-flash' })
+    );
+    expect(mockGetGenerativeModel).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ model: 'gemini-flash-latest' })
+    );
   });
 });

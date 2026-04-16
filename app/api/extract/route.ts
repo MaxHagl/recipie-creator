@@ -9,6 +9,51 @@ import { processRecipe } from '@/lib/gemini';
 const INSTAGRAM_URL_RE =
   /^https:\/\/www\.instagram\.com\/(p|reel)\/[A-Za-z0-9_-]+\/?$/;
 
+function isGeminiQuotaError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const status = (error as { status?: number }).status;
+  const message = error.message.toLowerCase();
+
+  return (
+    status === 429 &&
+    (message.includes('quota') ||
+      message.includes('rate limit') ||
+      message.includes('too many requests'))
+  );
+}
+
+function getRetryAfterSeconds(error: unknown): number | undefined {
+  if (!(error instanceof Error)) {
+    return undefined;
+  }
+
+  const errorWithDetails = error as { errorDetails?: unknown[] };
+
+  if (Array.isArray(errorWithDetails.errorDetails)) {
+    for (const detail of errorWithDetails.errorDetails) {
+      if (detail && typeof detail === 'object') {
+        const retryDelay = (detail as { retryDelay?: unknown }).retryDelay;
+        if (typeof retryDelay === 'string') {
+          const match = retryDelay.match(/^(\d+(?:\.\d+)?)s$/);
+          if (match) {
+            return Math.max(1, Math.ceil(Number.parseFloat(match[1])));
+          }
+        }
+      }
+    }
+  }
+
+  const messageMatch = error.message.match(/retry in\s+(\d+(?:\.\d+)?)s/i);
+  if (messageMatch) {
+    return Math.max(1, Math.ceil(Number.parseFloat(messageMatch[1])));
+  }
+
+  return undefined;
+}
+
 export async function POST(request: Request) {
   // Auth
   const cookieStore = await cookies();
@@ -86,6 +131,24 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: 'Could not access this post. It may be private.' },
         { status: 422 }
+      );
+    }
+
+    if (isGeminiQuotaError(error)) {
+      const retryAfterSeconds = getRetryAfterSeconds(error);
+      const message = retryAfterSeconds
+        ? `Gemini API quota exceeded. Please retry in about ${retryAfterSeconds} seconds, or update your Gemini billing/quota settings.`
+        : 'Gemini API quota exceeded. Please retry later, or update your Gemini billing/quota settings.';
+
+      return NextResponse.json(
+        { error: message },
+        {
+          status: 429,
+          headers:
+            retryAfterSeconds !== undefined
+              ? { 'Retry-After': String(retryAfterSeconds) }
+              : undefined,
+        }
       );
     }
 
