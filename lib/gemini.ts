@@ -18,6 +18,9 @@ Review the extracted recipe and correct obvious issues:
 - Sequence sanity: prep before cook, sauce before assembly, etc.
 - Cooking realism: temperatures/times should be plausible if present.
 - Duplicates or contradictions should be resolved.
+- Instructions are mandatory for every real recipe.
+- If source content lacks clear steps, infer practical cooking steps from the ingredient list and dish type.
+- Never return a recipe with empty/missing instructions.
 
 Do this QA pass internally. Apply fixes directly in the recipe output.
 Do NOT include audit notes, QA commentary, assumptions, or correction logs in the final HTML.
@@ -49,7 +52,7 @@ CONTENT STRUCTURE
 - <h1> recipe title
 - metadata row (servings/time if present) that MUST include an estimated calories per serving value
 - Ingredients
-- Instructions
+- Instructions as an ordered list with meaningful step text (at least 3 steps when a recipe is found)
 - Notes/Tips (only if present)
 
 NO-RECIPE CASE
@@ -68,6 +71,21 @@ const DEFAULT_MODEL_CANDIDATES = [
   'gemini-flash-latest',
   'gemini-2.0-flash',
 ];
+const INSTRUCTIONS_REPAIR_PROMPT = `The previous HTML output is missing complete recipe instructions.
+
+Rewrite and return the full HTML recipe document with:
+- a valid Ingredients section
+- a valid Instructions section containing at least 3 numbered <li> steps
+- coherent cooking flow that uses listed ingredients
+
+Return ONLY full HTML. No markdown or commentary.`;
+const INSTRUCTIONS_REPAIR_PROMPT_STRONG = `The recipe output still has missing/empty instructions.
+
+Create complete, practical cooking steps from the available ingredient list and dish context.
+Return a full valid HTML recipe document with a non-empty ordered Instructions list.
+Minimum 3 instruction steps for a recipe.
+
+Return ONLY full HTML.`;
 
 function extractTitle(html: string): string {
   const match = html.match(/<h1[^>]*>(.*?)<\/h1>/i);
@@ -79,6 +97,61 @@ function stripCodeFences(text: string): string {
     .replace(/^```(?:html)?\s*/i, '')
     .replace(/\s*```$/i, '')
     .trim();
+}
+
+function isNoRecipeFoundHtml(html: string): boolean {
+  return /no recipe found in this post/i.test(html);
+}
+
+function hasInstructionSteps(html: string): boolean {
+  const instructionsSectionMatch = html.match(
+    /<h[1-6][^>]*>\s*instructions?\s*<\/h[1-6]>\s*<ol[^>]*>([\s\S]*?)<\/ol>/i
+  );
+  const olContent =
+    instructionsSectionMatch?.[1] ?? html.match(/<ol[^>]*>([\s\S]*?)<\/ol>/i)?.[1];
+
+  if (!olContent) {
+    return false;
+  }
+
+  return (olContent.match(/<li\b/gi) || []).length > 0;
+}
+
+async function ensureInstructionSteps(
+  model: { generateContent: (parts: Part[]) => Promise<{ response: { text: () => string } }> },
+  originalParts: Part[],
+  html: string
+): Promise<string> {
+  if (isNoRecipeFoundHtml(html) || hasInstructionSteps(html)) {
+    return html;
+  }
+
+  const repairParts: Part[] = [
+    ...originalParts,
+    {
+      text:
+        `${INSTRUCTIONS_REPAIR_PROMPT}\n\n` +
+        `Previous HTML output:\n${html}`,
+    },
+  ];
+
+  const repaired = stripCodeFences((await model.generateContent(repairParts)).response.text());
+  if (isNoRecipeFoundHtml(repaired) || hasInstructionSteps(repaired)) {
+    return repaired;
+  }
+
+  const strongerRepairParts: Part[] = [
+    ...originalParts,
+    {
+      text:
+        `${INSTRUCTIONS_REPAIR_PROMPT_STRONG}\n\n` +
+        `Previous HTML output:\n${repaired}`,
+    },
+  ];
+
+  return stripCodeFences(
+    (await model.generateContent(strongerRepairParts)).response.text()
+  );
 }
 
 function decodeHtmlEntities(input: string): string {
@@ -252,7 +325,8 @@ export async function processRecipe(
 
     try {
       const result = await model.generateContent(parts);
-      const rawHtml = stripCodeFences(result.response.text());
+      const initialHtml = stripCodeFences(result.response.text());
+      const rawHtml = await ensureInstructionSteps(model, parts, initialHtml);
       const title = extractTitle(rawHtml);
       const html = injectReminderButton(rawHtml, title);
       return { html, title };

@@ -17,6 +17,8 @@ Password-protected Next.js app that extracts recipes from Instagram posts/Reels 
   - `APP_PASSWORD_HASH`
   - `SESSION_SECRET`
   - `GEMINI_API_KEY`
+  - `SHARE_API_TOKEN` (required for iPhone Share Shortcut endpoint)
+  - `SHOPPING_SHORTCUT_NAME` (optional, defaults to `AddHTMLTask`)
 
 Use `.env.example` for generation commands.
 
@@ -46,3 +48,4 @@ npm run start
 
 - `POST /api/auth`: validate password and set session cookie
 - `POST /api/extract`: authenticated scrape -> optional video upload -> Gemini recipe HTML output
+- `POST /api/extract/share`: token-authenticated variant for mobile Share Shortcuts (`Authorization: Bearer <SHARE_API_TOKEN>`)

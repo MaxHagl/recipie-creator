@@ -1,6 +1,5 @@
+import crypto from 'crypto';
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { isValidSessionToken } from '@/lib/auth';
 import { checkRateLimit } from '@/lib/rateLimit';
 import { scrapeInstagram } from '@/lib/scraper';
 import { uploadVideoToGemini } from '@/lib/videoProcessor';
@@ -12,15 +11,51 @@ import {
   normalizeInstagramRecipeUrl,
 } from '@/lib/extractRouteUtils';
 
+function timingSafeEqualString(a: string, b: string): boolean {
+  const aBuffer = Buffer.from(a);
+  const bBuffer = Buffer.from(b);
+  if (aBuffer.length !== bBuffer.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(aBuffer, bBuffer);
+}
+
+function getBearerToken(authHeader: string | null): string | null {
+  if (!authHeader) {
+    return null;
+  }
+
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || null;
+}
+
+function hasValidShareToken(request: Request): boolean {
+  const expectedToken = process.env.SHARE_API_TOKEN?.trim();
+  if (!expectedToken) {
+    return false;
+  }
+
+  const providedToken = getBearerToken(request.headers.get('authorization'));
+  if (!providedToken) {
+    return false;
+  }
+
+  return timingSafeEqualString(expectedToken, providedToken);
+}
+
 export async function POST(request: Request) {
-  // Auth
-  const cookieStore = await cookies();
-  const session = cookieStore.get('session');
-  if (!session || !isValidSessionToken(session.value)) {
+  const configuredToken = process.env.SHARE_API_TOKEN?.trim();
+  if (!configuredToken) {
+    return NextResponse.json(
+      { error: 'Share endpoint is not configured' },
+      { status: 500 }
+    );
+  }
+
+  if (!hasValidShareToken(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Rate limit
   const ip =
     request.headers.get('x-forwarded-for')?.split(',')[0].trim() ?? '127.0.0.1';
   if (!checkRateLimit(ip)) {
@@ -30,7 +65,6 @@ export async function POST(request: Request) {
     );
   }
 
-  // Parse + validate URL
   let url: string;
   try {
     const body = await request.json();
@@ -43,7 +77,6 @@ export async function POST(request: Request) {
   }
 
   const normalizedUrl = normalizeInstagramRecipeUrl(url);
-
   if (!normalizedUrl) {
     return NextResponse.json({ error: 'Invalid Instagram URL' }, { status: 400 });
   }
@@ -64,18 +97,16 @@ export async function POST(request: Request) {
           uploaded.fileUri,
           uploaded.mimeType
         );
-        return NextResponse.json({ html, title });
+        return NextResponse.json({ html, title, normalizedUrl });
       } catch (videoPipelineError) {
-        // Reel video handling can fail transiently (CDN/Gemini processing). Fall
-        // back to caption-only extraction when possible instead of hard-failing.
         if (caption.trim().length > 0) {
           console.warn(
-            '[extract] Video pipeline failed, falling back to caption-only',
+            '[extract/share] Video pipeline failed, falling back to caption-only',
             videoPipelineError
           );
           stage = 'gemini';
           const { html, title } = await processRecipe(caption);
-          return NextResponse.json({ html, title });
+          return NextResponse.json({ html, title, normalizedUrl });
         }
         throw videoPipelineError;
       }
@@ -83,9 +114,9 @@ export async function POST(request: Request) {
 
     stage = 'gemini';
     const { html, title } = await processRecipe(caption);
-    return NextResponse.json({ html, title });
+    return NextResponse.json({ html, title, normalizedUrl });
   } catch (error) {
-    console.error('[extract]', error);
+    console.error('[extract/share]', error);
 
     if (error instanceof Error && error.message.toLowerCase().includes('login')) {
       return NextResponse.json(
@@ -115,10 +146,7 @@ export async function POST(request: Request) {
     if (isGeminiOverloadedError(error)) {
       const retryAfterSeconds = getRetryAfterSeconds(error) ?? 30;
       return NextResponse.json(
-        {
-          error:
-            'Gemini is temporarily busy right now. Please retry shortly.',
-        },
+        { error: 'Gemini is temporarily busy right now. Please retry shortly.' },
         {
           status: 503,
           headers: { 'Retry-After': String(retryAfterSeconds) },

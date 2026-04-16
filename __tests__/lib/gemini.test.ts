@@ -21,7 +21,10 @@ describe('processRecipe', () => {
 
   it('returns html and extracted title', async () => {
     mockGenerateContent.mockResolvedValue({
-      response: { text: () => '<html><body><h1>Pasta Carbonara</h1></body></html>' },
+      response: {
+        text: () =>
+          '<html><body><h1>Pasta Carbonara</h1><h2>Instructions</h2><ol><li>Cook pasta</li></ol></body></html>',
+      },
     });
 
     const result = await processRecipe('pasta recipe caption');
@@ -32,7 +35,8 @@ describe('processRecipe', () => {
   it('strips markdown code fences from response', async () => {
     mockGenerateContent.mockResolvedValue({
       response: {
-        text: () => '```html\n<html><body><h1>Soup</h1></body></html>\n```',
+        text: () =>
+          '```html\n<html><body><h1>Soup</h1><h2>Instructions</h2><ol><li>Simmer broth</li></ol></body></html>\n```',
       },
     });
 
@@ -52,7 +56,10 @@ describe('processRecipe', () => {
 
   it('includes fileData part when videoFileUri is provided', async () => {
     mockGenerateContent.mockResolvedValue({
-      response: { text: () => '<html><body><h1>Reel Recipe</h1></body></html>' },
+      response: {
+        text: () =>
+          '<html><body><h1>Reel Recipe</h1><h2>Instructions</h2><ol><li>Mix ingredients</li></ol></body></html>',
+      },
     });
 
     await processRecipe('caption', 'https://files.gemini/abc', 'video/mp4');
@@ -73,7 +80,10 @@ describe('processRecipe', () => {
         Object.assign(new Error('model is no longer available'), { status: 404 })
       )
       .mockResolvedValueOnce({
-        response: { text: () => '<html><body><h1>Fallback Model</h1></body></html>' },
+        response: {
+          text: () =>
+            '<html><body><h1>Fallback Model</h1><h2>Instructions</h2><ol><li>Cook gently</li></ol></body></html>',
+        },
       });
 
     const result = await processRecipe('fallback caption');
@@ -94,7 +104,10 @@ describe('processRecipe', () => {
         Object.assign(new Error('Service Unavailable: model high demand'), { status: 503 })
       )
       .mockResolvedValueOnce({
-        response: { text: () => '<html><body><h1>Overload Fallback</h1></body></html>' },
+        response: {
+          text: () =>
+            '<html><body><h1>Overload Fallback</h1><h2>Instructions</h2><ol><li>Cook gently</li></ol></body></html>',
+        },
       });
 
     const result = await processRecipe('fallback caption');
@@ -109,11 +122,32 @@ describe('processRecipe', () => {
     );
   });
 
+  it('repairs missing instructions when model omits steps initially', async () => {
+    mockGenerateContent
+      .mockResolvedValueOnce({
+        response: {
+          text: () =>
+            '<html><body><h1>Quick Pasta</h1><h2>Ingredients</h2><ul><li>200g pasta</li></ul></body></html>',
+        },
+      })
+      .mockResolvedValueOnce({
+        response: {
+          text: () =>
+            '<html><body><h1>Quick Pasta</h1><h2>Ingredients</h2><ul><li>200g pasta</li></ul><h2>Instructions</h2><ol><li>Boil pasta</li><li>Drain pasta</li><li>Serve</li></ol></body></html>',
+        },
+      });
+
+    const result = await processRecipe('missing steps caption');
+    expect(result.html).toContain('<h2>Instructions</h2>');
+    expect(result.html).toContain('<li>Boil pasta</li>');
+    expect(mockGenerateContent).toHaveBeenCalledTimes(2);
+  });
+
   it('injects a shortcuts reminder button with all ingredients', async () => {
     mockGenerateContent.mockResolvedValue({
       response: {
         text: () =>
-          '<!DOCTYPE html><html><body><h1>Tacos</h1><h2>Ingredients</h2><ul><li>1 lb beef</li><li>2 tortillas</li></ul></body></html>',
+          '<!DOCTYPE html><html><body><h1>Tacos</h1><h2>Ingredients</h2><ul><li>1 lb beef</li><li>2 tortillas</li></ul><h2>Instructions</h2><ol><li>Cook beef</li></ol></body></html>',
       },
     });
 
@@ -129,7 +163,7 @@ describe('processRecipe', () => {
     mockGenerateContent.mockResolvedValue({
       response: {
         text: () =>
-          '<!DOCTYPE html><html><body><h1>Soup</h1><h2>Ingredients</h2><ul><li>1&ndash;2 tbsp olive oil</li></ul></body></html>',
+          '<!DOCTYPE html><html><body><h1>Soup</h1><h2>Ingredients</h2><ul><li>1&ndash;2 tbsp olive oil</li></ul><h2>Instructions</h2><ol><li>Heat oil</li></ol></body></html>',
       },
     });
 
