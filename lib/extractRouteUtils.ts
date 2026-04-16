@@ -29,6 +29,57 @@ function findFirstUrlCandidate(input: string): string | null {
   return null;
 }
 
+export function extractPotentialUrlFromPayload(payload: unknown): string | null {
+  const queue: unknown[] = [payload];
+  const seen = new Set<object>();
+  const priorityKeys = [
+    'url',
+    'link',
+    'href',
+    'input',
+    'text',
+    'sharedUrl',
+    'shared_url',
+  ];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+
+    if (typeof current === 'string') {
+      const candidate = findFirstUrlCandidate(current);
+      if (candidate) {
+        return candidate;
+      }
+      continue;
+    }
+
+    if (Array.isArray(current)) {
+      for (const item of current) queue.push(item);
+      continue;
+    }
+
+    if (current && typeof current === 'object') {
+      const obj = current as Record<string, unknown>;
+      if (seen.has(obj)) {
+        continue;
+      }
+      seen.add(obj);
+
+      for (const key of priorityKeys) {
+        if (Object.hasOwn(obj, key)) {
+          queue.unshift(obj[key]);
+        }
+      }
+
+      for (const value of Object.values(obj)) {
+        queue.push(value);
+      }
+    }
+  }
+
+  return null;
+}
+
 function extractCanonicalPathFromSegments(segments: string[]): string | null {
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i]?.toLowerCase();

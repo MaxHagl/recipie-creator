@@ -90,6 +90,22 @@ describe('POST /api/extract/share', () => {
     expect(mockScrape).toHaveBeenCalledWith('https://www.instagram.com/reel/DW7wNS3Ev8r/');
   });
 
+  it('accepts array-style payloads from share sheet wrappers', async () => {
+    mockScrape.mockResolvedValue({ caption: 'pasta recipe', videoUrl: null });
+    mockProcess.mockResolvedValue({ html: '<h1>Pasta</h1>', title: 'Pasta' });
+
+    const res = await POST(
+      makeRequest({
+        url: [
+          'https://www.instagram.com/reel/DW7wNS3Ev8r/?igsh=test',
+        ],
+      })
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockScrape).toHaveBeenCalledWith('https://www.instagram.com/reel/DW7wNS3Ev8r/');
+  });
+
   it('returns 429 if rate limit exceeded', async () => {
     mockRateLimit.mockReturnValue(false);
     const res = await POST(

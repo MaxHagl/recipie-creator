@@ -5,6 +5,7 @@ import { scrapeInstagram } from '@/lib/scraper';
 import { uploadVideoToGemini } from '@/lib/videoProcessor';
 import { processRecipe } from '@/lib/gemini';
 import {
+  extractPotentialUrlFromPayload,
   getRetryAfterSeconds,
   isGeminiOverloadedError,
   isGeminiQuotaError,
@@ -65,18 +66,19 @@ export async function POST(request: Request) {
     );
   }
 
-  let url: string;
+  let requestBody: unknown;
   try {
-    const body = await request.json();
-    url = body.url;
-    if (typeof url !== 'string') {
-      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
-    }
+    requestBody = await request.json();
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
-  const normalizedUrl = normalizeInstagramRecipeUrl(url);
+  const extractedUrl = extractPotentialUrlFromPayload(requestBody);
+  if (!extractedUrl) {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  }
+
+  const normalizedUrl = normalizeInstagramRecipeUrl(extractedUrl);
   if (!normalizedUrl) {
     return NextResponse.json({ error: 'Invalid Instagram URL' }, { status: 400 });
   }
