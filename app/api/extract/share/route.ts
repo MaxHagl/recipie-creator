@@ -13,6 +13,27 @@ import {
   normalizeInstagramRecipeUrl,
 } from '@/lib/extractRouteUtils';
 
+const REEL_RETRY_MESSAGE =
+  'Could not analyze reel video content. Please retry in a moment.';
+
+function isReelRequestUrl(url: string): boolean {
+  return /\/reel\/[A-Za-z0-9_-]+\/?$/i.test(url);
+}
+
+function shouldTreatAsRecipeResult(result: { hasRecipe?: boolean }): boolean {
+  return result.hasRecipe !== false;
+}
+
+function buildReelRetryResponse() {
+  return NextResponse.json(
+    { error: REEL_RETRY_MESSAGE },
+    {
+      status: 503,
+      headers: { 'Retry-After': '30' },
+    }
+  );
+}
+
 function timingSafeEqualString(a: string, b: string): boolean {
   const aBuffer = Buffer.from(a);
   const bBuffer = Buffer.from(b);
@@ -87,6 +108,7 @@ export async function POST(request: Request) {
   if (!normalizedUrl) {
     return NextResponse.json({ error: 'Invalid Instagram URL' }, { status: 400 });
   }
+  const reelRequest = isReelRequestUrl(normalizedUrl);
 
   let stage: 'scrape' | 'video' | 'gemini' = 'scrape';
 
@@ -99,13 +121,34 @@ export async function POST(request: Request) {
       try {
         const uploaded = await uploadVideoToGemini(videoUrl);
         stage = 'gemini';
-        const { html, title } = await processRecipe(
+        const videoResult = await processRecipe(
           caption,
           uploaded.fileUri,
           uploaded.mimeType,
           { dateNightMode }
         );
-        return NextResponse.json({ html, title, normalizedUrl });
+        if (shouldTreatAsRecipeResult(videoResult)) {
+          return NextResponse.json({
+            html: videoResult.html,
+            title: videoResult.title,
+            normalizedUrl,
+          });
+        }
+
+        if (caption.trim().length > 0) {
+          const fallbackResult = await processRecipe(caption, undefined, undefined, {
+            dateNightMode,
+          });
+          if (shouldTreatAsRecipeResult(fallbackResult)) {
+            return NextResponse.json({
+              html: fallbackResult.html,
+              title: fallbackResult.title,
+              normalizedUrl,
+            });
+          }
+        }
+
+        return buildReelRetryResponse();
       } catch (videoPipelineError) {
         if (caption.trim().length > 0) {
           console.warn(
@@ -117,7 +160,7 @@ export async function POST(request: Request) {
             dateNightMode,
           });
 
-          if (fallbackResult.hasRecipe) {
+          if (shouldTreatAsRecipeResult(fallbackResult)) {
             return NextResponse.json({
               html: fallbackResult.html,
               title: fallbackResult.title,
@@ -125,25 +168,24 @@ export async function POST(request: Request) {
             });
           }
 
-          return NextResponse.json(
-            {
-              error: 'Could not analyze reel video content. Please retry in a moment.',
-            },
-            {
-              status: 503,
-              headers: { 'Retry-After': '30' },
-            }
-          );
+          return buildReelRetryResponse();
         }
         throw videoPipelineError;
       }
     }
 
     stage = 'gemini';
-    const { html, title } = await processRecipe(caption, undefined, undefined, {
+    const fallbackResult = await processRecipe(caption, undefined, undefined, {
       dateNightMode,
     });
-    return NextResponse.json({ html, title, normalizedUrl });
+    if (reelRequest && !shouldTreatAsRecipeResult(fallbackResult)) {
+      return buildReelRetryResponse();
+    }
+    return NextResponse.json({
+      html: fallbackResult.html,
+      title: fallbackResult.title,
+      normalizedUrl,
+    });
   } catch (error) {
     console.error('[extract/share]', error);
 

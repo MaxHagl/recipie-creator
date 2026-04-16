@@ -172,6 +172,65 @@ describe('POST /api/extract/share', () => {
     });
   });
 
+  it('falls back to caption-only when video analysis returns no recipe but caption succeeds', async () => {
+    mockScrape.mockResolvedValue({
+      caption: 'hot pocket recipe',
+      videoUrl: 'https://example.com/video.mp4',
+    });
+    mockUpload.mockResolvedValue({ fileUri: 'https://files.gemini/x', mimeType: 'video/mp4' });
+    mockProcess
+      .mockResolvedValueOnce({
+        html: '<h1>No recipe</h1><p>No recipe found in this post.</p>',
+        title: 'No recipe',
+        hasRecipe: false,
+      })
+      .mockResolvedValueOnce({
+        html: '<h1>Hot Pockets</h1>',
+        title: 'Hot Pockets',
+        hasRecipe: true,
+      });
+
+    const res = await POST(
+      makeRequest({ url: 'https://www.instagram.com/reel/abc123/' })
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockProcess).toHaveBeenNthCalledWith(
+      1,
+      'hot pocket recipe',
+      'https://files.gemini/x',
+      'video/mp4',
+      { dateNightMode: false }
+    );
+    expect(mockProcess).toHaveBeenNthCalledWith(
+      2,
+      'hot pocket recipe',
+      undefined,
+      undefined,
+      { dateNightMode: false }
+    );
+  });
+
+  it('returns 503 for reel requests when no video URL is available and caption fallback has no recipe', async () => {
+    mockScrape.mockResolvedValue({
+      caption: 'High Protein Hot Pockets',
+      videoUrl: null,
+    });
+    mockProcess.mockResolvedValue({
+      html: '<h1>High Protein Hot Pockets</h1><p>No recipe found in this post.</p>',
+      title: 'High Protein Hot Pockets',
+      hasRecipe: false,
+    });
+
+    const res = await POST(
+      makeRequest({ url: 'https://www.instagram.com/reel/abc123/' })
+    );
+    expect(res.status).toBe(503);
+    expect(res.headers.get('retry-after')).toBe('30');
+    const data = await res.json();
+    expect(data.error).toContain('Could not analyze reel video content');
+  });
+
   it('returns 503 when reel video processing fails and caption fallback has no recipe', async () => {
     mockScrape.mockResolvedValue({
       caption: 'fallback caption no recipe',

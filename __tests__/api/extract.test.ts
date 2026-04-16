@@ -150,7 +150,11 @@ describe('POST /api/extract', () => {
     mockAuth();
     mockScrape.mockResolvedValue({ caption: 'reel recipe', videoUrl: 'https://example.com/v.mp4' });
     mockUpload.mockResolvedValue({ fileUri: 'https://files.gemini/x', mimeType: 'video/mp4' });
-    mockProcess.mockResolvedValue({ html: '<h1>Reel Recipe</h1>', title: 'Reel Recipe' });
+    mockProcess.mockResolvedValue({
+      html: '<h1>Reel Recipe</h1>',
+      title: 'Reel Recipe',
+      hasRecipe: true,
+    });
 
     const res = await POST(makeRequest({ url: 'https://www.instagram.com/reel/abc123/' }));
     expect(res.status).toBe(200);
@@ -182,6 +186,78 @@ describe('POST /api/extract', () => {
     expect(mockProcess).toHaveBeenCalledWith('fallback caption recipe', undefined, undefined, {
       dateNightMode: false,
     });
+  });
+
+  it('falls back to caption-only when video analysis returns no recipe but caption succeeds', async () => {
+    mockAuth();
+    mockScrape.mockResolvedValue({
+      caption: 'hot pocket recipe',
+      videoUrl: 'https://example.com/v.mp4',
+    });
+    mockUpload.mockResolvedValue({ fileUri: 'https://files.gemini/x', mimeType: 'video/mp4' });
+    mockProcess
+      .mockResolvedValueOnce({
+        html: '<h1>No recipe</h1><p>No recipe found in this post.</p>',
+        title: 'No recipe',
+        hasRecipe: false,
+      })
+      .mockResolvedValueOnce({
+        html: '<h1>High Protein Hot Pockets</h1>',
+        title: 'High Protein Hot Pockets',
+        hasRecipe: true,
+      });
+
+    const res = await POST(makeRequest({ url: 'https://www.instagram.com/reel/abc123/' }));
+    expect(res.status).toBe(200);
+    expect(mockProcess).toHaveBeenNthCalledWith(
+      1,
+      'hot pocket recipe',
+      'https://files.gemini/x',
+      'video/mp4',
+      { dateNightMode: false }
+    );
+    expect(mockProcess).toHaveBeenNthCalledWith(
+      2,
+      'hot pocket recipe',
+      undefined,
+      undefined,
+      { dateNightMode: false }
+    );
+  });
+
+  it('returns 503 for reel requests when no video URL is available and caption fallback has no recipe', async () => {
+    mockAuth();
+    mockScrape.mockResolvedValue({
+      caption: 'High Protein Hot Pockets',
+      videoUrl: null,
+    });
+    mockProcess.mockResolvedValue({
+      html: '<h1>High Protein Hot Pockets</h1><p>No recipe found in this post.</p>',
+      title: 'High Protein Hot Pockets',
+      hasRecipe: false,
+    });
+
+    const res = await POST(makeRequest({ url: 'https://www.instagram.com/reel/abc123/' }));
+    expect(res.status).toBe(503);
+    expect(res.headers.get('retry-after')).toBe('30');
+    const data = await res.json();
+    expect(data.error).toContain('Could not analyze reel video content');
+  });
+
+  it('keeps non-reel no-recipe behavior unchanged', async () => {
+    mockAuth();
+    mockScrape.mockResolvedValue({
+      caption: 'random post',
+      videoUrl: null,
+    });
+    mockProcess.mockResolvedValue({
+      html: '<h1>Not found</h1><p>No recipe found in this post.</p>',
+      title: 'Not found',
+      hasRecipe: false,
+    });
+
+    const res = await POST(makeRequest({ url: 'https://www.instagram.com/p/abc123/' }));
+    expect(res.status).toBe(200);
   });
 
   it('returns 503 when reel video pipeline fails and caption fallback has no recipe', async () => {
