@@ -10,6 +10,13 @@ RECIPE EXTRACTION RULES
 2) Remove Instagram noise: hashtags, @mentions, follow/share CTAs, promo lines, unrelated storytelling.
 3) Normalize ambiguous shorthand where reasonable (e.g., "tsp", "tbsp", "oz", fractions).
 4) If details are missing, keep language conservative and do not invent highly specific facts.
+5) Input may be in English, German, or Spanish. You must correctly interpret all three.
+
+LANGUAGE HANDLING (required)
+- Always output the final recipe in English only.
+- Translate ingredient names, instructions, notes, and metadata from German/Spanish to natural English.
+- Convert locale-specific cooking terms to standard English kitchen terminology.
+- Preserve original quantities and units unless a harmless normalization improves clarity.
 
 CONSISTENCY / "DOUBLE CHECK" PASS (required before output)
 Review the extracted recipe and correct obvious issues:
